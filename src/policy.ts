@@ -80,7 +80,7 @@ export async function writablePath(
         throw new Error("Write follows a path outside the approved scope");
       }
       try {
-        const stat = await lstat(target);
+        const stat = await lstat(resolved);
         if (stat.isFile() && stat.nlink > 1)
           throw new Error("Writing hard-linked files is unsupported");
       } catch (error) {
