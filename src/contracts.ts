@@ -99,19 +99,19 @@ export const WorkerResultSchema = Type.Union([
   Type.Object({ kind: Type.Literal("blocked"), reason: text }, closed),
 ]);
 
-export const StageSchema = Type.Enum({
-  preflight: "preflight",
-  work: "work",
-  commit: "commit",
-  checks: "checks",
-  secondPass: "secondPass",
-  review: "review",
-  repair: "repair",
-  publish: "publish",
-  monitor: "monitor",
-  merge: "merge",
-  retrospective: "retrospective",
-});
+export const StageSchema = Type.Union([
+  Type.Literal("preflight"),
+  Type.Literal("work"),
+  Type.Literal("commit"),
+  Type.Literal("checks"),
+  Type.Literal("secondPass"),
+  Type.Literal("review"),
+  Type.Literal("repair"),
+  Type.Literal("publish"),
+  Type.Literal("monitor"),
+  Type.Literal("merge"),
+  Type.Literal("retrospective"),
+]);
 
 export const EvidenceSchema = Type.Object(
   {
@@ -149,6 +149,7 @@ export const OperationSchema = Type.Object(
       Type.Literal("pr"),
       Type.Literal("retarget"),
       Type.Literal("merge"),
+      Type.Literal("resolve"),
     ]),
     unit: Type.Integer({ minimum: 0 }),
     expectedHead: Type.Union([sha, Type.Null()]),
@@ -197,6 +198,7 @@ export const RunSchema = Type.Object(
       ),
     ),
     checkpoint: Type.String(),
+    resumeStage: StageSchema,
     acceptRecoveredEdits: Type.Boolean(),
     summary: Type.String(),
   },
@@ -213,7 +215,7 @@ export type WorkerResult = Static<typeof WorkerResultSchema>;
 export type Stage = Static<typeof StageSchema>;
 
 export type StepResult =
-  | { kind: "passed"; run: Run; next?: "work" | "checks" | "secondPass" | "review" | "monitor" }
+  | { kind: "passed"; run: Run; next?: Exclude<Stage, "preflight"> }
   | { kind: "repair"; run: Run; reason: string }
   | { kind: "blocked"; run: Run; reason: string };
 
@@ -294,6 +296,7 @@ export function makeRun(
     operations: [],
     edits: [],
     checkpoint: "preflight",
+    resumeStage: "work",
     acceptRecoveredEdits: false,
     summary: "",
   };

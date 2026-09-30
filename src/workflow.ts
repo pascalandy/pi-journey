@@ -16,7 +16,7 @@ type Event =
   | { type: "implementation.requested"; run: Run }
   | { type: "planning.requested" }
   | { type: "run.recovered"; run: Run }
-  | { type: "run.resumed"; acceptRecoveredEdits: boolean }
+  | { type: "run.resumed"; acceptRecoveredEdits: boolean; run?: Run }
   | { type: "ownership.lost"; reason: string };
 
 export function workflowMachine(ports: WorkflowPorts) {
@@ -43,7 +43,7 @@ export function workflowMachine(ports: WorkflowPorts) {
       resume: assign(({ context, event }) => ({
         run:
           context.run !== null && event.type === "run.resumed"
-            ? { ...context.run, acceptRecoveredEdits: event.acceptRecoveredEdits }
+            ? { ...(event.run ?? context.run), acceptRecoveredEdits: event.acceptRecoveredEdits }
             : context.run,
         reason: "",
       })),
@@ -103,7 +103,20 @@ export function workflowMachine(ports: WorkflowPorts) {
             target: "repair",
             actions: resultAction,
           },
-          ...(["work", "checks", "secondPass", "review", "monitor"] as const).map((next) => ({
+          ...(
+            [
+              "work",
+              "commit",
+              "checks",
+              "secondPass",
+              "review",
+              "repair",
+              "publish",
+              "monitor",
+              "merge",
+              "retrospective",
+            ] as const
+          ).map((next) => ({
             guard: ({ event }: { event: { output: StepResult } }) =>
               event.output.kind === "passed" && event.output.next === next,
             target: next,

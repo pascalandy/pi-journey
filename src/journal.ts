@@ -16,7 +16,7 @@ import { hostname } from "node:os";
 import { join, resolve } from "node:path";
 import lockfile from "proper-lockfile";
 import { Type } from "typebox";
-import { parse, parseRun, type Run } from "./contracts.ts";
+import { parse, parseRun, type Run, StageSchema } from "./contracts.ts";
 
 const OwnerSchema = Type.Object(
   {
@@ -153,6 +153,20 @@ export class Journal {
     this.write({
       ...latest,
       checkpoint: phase,
+      resumeStage: [
+        "work",
+        "commit",
+        "checks",
+        "secondPass",
+        "review",
+        "repair",
+        "publish",
+        "monitor",
+        "merge",
+        "retrospective",
+      ].includes(phase)
+        ? parse(StageSchema, phase, "resume stage")
+        : latest.resumeStage,
       repairRounds: run.repairRounds,
       repairReason: run.repairReason,
       acceptRecoveredEdits: run.acceptRecoveredEdits,
