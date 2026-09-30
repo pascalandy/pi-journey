@@ -4,6 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defaultConfig, makePlan, makeRun } from "../src/contracts.ts";
 
+// A Git hook exports GIT_DIR and GIT_WORK_TREE; fixtures and the code under test
+// would otherwise write to the repository that runs the hook
+for (const key of Object.keys(process.env)) if (key.startsWith("GIT_")) delete process.env[key];
+
 export async function repository() {
   const root = await mkdtemp(join(tmpdir(), "pi-mode-workflow-test-"));
   execFileSync("git", ["init", "--initial-branch=main", root], { stdio: "ignore" });

@@ -15,6 +15,10 @@ install:
 # Typecheck, test, lint, build, and load the extension in an isolated Pi
 [group('checks')]
 check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # A Git hook exports GIT_DIR; the checks' own git calls must not reach this repository
+    unset $(compgen -e | grep '^GIT_' || true)
     pnpm run check
     pnpm run build
     pnpm run verify
