@@ -34,7 +34,7 @@
 <li>Run a second pass and an independent read-only reviewer against the current Git revision</li>
 <li>Fix valid findings within a bounded budget and repeat affected evidence</li>
 <li>Deliver a single PR or an ordered linear stack when the selected delivery capability is available</li>
-<li>Poll new checks and reviews incrementally while preserving and reconciling all unresolved findings</li>
+<li>Poll current checks and reviews while preserving and reconciling all unresolved findings across pushes</li>
 <li>Merge only with run-specific authorization and fresh positive evidence</li>
 <li>Return to Planning while work is active, without admitting new writes or leaving an unowned worker</li>
 <li>Recover after reload, crash, branch navigation, missing credentials, or an uncertain external result</li>
@@ -63,7 +63,7 @@
 <li>Inject the supplied Planning instructions. Allow known read tools and a plan-recording tool</li>
 <li>Record plan text, writable scope, ordered units, required checks, and a content digest</li>
 <li>The operator runs <code>/workflow implement</code> or the shortcut to approve that exact digest. <code>--merge</code> separately grants eventual merge authority for this run</li>
-<li>Acquire exclusive ownership of the canonical repository/worktree. Preflight identity, cleanliness, tools, model access, skills, command-execution grants, and delivery configuration</li>
+<li>Acquire exclusive ownership of the canonical repository/worktree. Preflight identity, cleanliness, the selected model, skill files, reviewer protocol and login, command-execution grants, and delivery configuration. Actual model access is established by its first request</li>
 <li>One SDK worker executes each unit with scoped edits. The coordinator verifies scope, creates a commit, runs authoritative checks against that clean committed tree, and confirms that checks did not change source content</li>
 <li>Run the configured second-pass skill, display the exact Codex command, then launch GPT-6 Astra high in read-only mode</li>
 <li>Validate findings, repair within the configured budget, and invalidate review and check evidence when HEAD changes</li>
@@ -94,7 +94,7 @@ Restart → reconciliation, with effects closed</pre>
 <p>Store intent before an external mutation and an observed receipt afterward. On restart, inspect Git and GitHub before resuming. Never start restored effectful actors directly or replay PR creation or merging because a completion receipt is absent. Preserve dirty content after a crash. Explicit resume can accept attributable in-scope edits; unrelated or unattributable changes remain blocked. No reset, cleanup, or deletion hides them.</p>
 <p>Preserve the causal phase and pending decision. Changed plan digests revoke approval. Changed heads invalidate affected evidence. Changed repository identity, missing capabilities, conflicts, exhausted budgets, and ambiguous observations produce a named blocked state. Persist outstanding review findings independently of the polling cursor. A new push must reconcile older unresolved findings, not discard them.</p>
 <h3>Linear-stack delivery</h3>
-<p>When selected, ordered units map to ordered branches. Each branch starts from the preceding unit's committed head. Publish PRs bottom-up against their actual dependent bases. Record and verify checks, independent review, and unresolved findings for every PR's base and head. Land only the contiguous verified prefix.</p>
+<p>When selected, ordered units map to ordered branches. Each branch starts from the preceding unit's committed head. Publish PRs bottom-up against their actual dependent bases. Record and verify checks, independent review, and unresolved findings for every PR's base and head. The first release waits for all remaining layers before landing the contiguous verified prefix.</p>
 <p>After an ancestor lands, reconcile each remaining base against the destination branch, retarget the next eligible PR, and refresh affected evidence. Use merge commits that preserve ancestry. Never force-push or silently rebase. Conflicts, unsupported server policy, or a required destructive history rewrite block with a concrete decision. A changed descendant head invalidates its previous evidence.</p>
 <h3>Canonical Planning instructions</h3>
 <p><code>prompts/planning.md</code> owns the runtime text. This generated snapshot supplies the literal AC-01 expectation. <code>scripts/plan-prompt.mjs --check</code> detects drift.</p>
@@ -183,13 +183,19 @@ If you have no questions, write:
 </section>
 
 <section id="sources"><h2>Sources and remaining proof</h2>
+<p>Three implementation reviews found thirteen defects, followed by a fresh full-PR review with seven further findings. Six local remedies now preserve file preimages, require explicit remote evidence, restore tree-branch proposals, normalize scope paths, parse Git filenames with NUL delimiters, and permit retiring a blocked run without removing work. Forty-nine behavioral tests cover these boundaries alongside typing, lint, build and isolated Pi loading.</p>
+<p>Release remains blocked: GitHub's documented merge inputs pin the head SHA but do not establish an atomic destination precondition. Retargeting after observation can escape the approved branch. The recommended first-release option is to disable automated merging and deliver PRs for manual landing. This scope decision and successful hosted CI are still required before merge.</p>
+<p>Implementation post-mortem: happy-path fixtures missed recovery boundaries and review progression. The verification harness now kills the coordinator, loses accepted remote responses, and changes state between observation and action. Host-level review permissions are verified from the actual Codex header. Native subagent metadata and a full session transcript were unavailable, so their advice is not presented as enforced sandbox proof.</p>
 <ul>
 <li><a href="https://github.com/statelyai/skills/blob/e7874e5/skills/xstate-v5/SKILL.md">Stately XState v5 skill</a></li>
 <li><a href="https://github.com/joelhooks/pi-until/blob/4096bcb/src/follow-up.ts">Pi Until delivery protocol</a></li>
+<li><a href="https://github.com/joelhooks/pi-bellwether/commit/b98cbed0a22450cc3ffbe5ff4f9178f65cb2e242">Bellwether audit revision</a></li>
+<li><a href="https://github.com/joelhooks/pi-fast-jev-compaction/commit/eb83f533f4fd10a08728b02c062c249afda5a4dc">Fast JEV Compaction audit revision</a></li>
+<li><a href="https://github.com/joelhooks/pi-workflow-os/commit/bfcbf0937d9d8c5ceaf9003da04c18fc8dcf4c89">Workflow OS audit revision</a></li>
 <li><a href="https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md">Pi extension contracts</a></li>
 <li><a href="https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/sdk.md">Pi SDK lifecycle</a></li>
 </ul>
-<p>Local installed Pi 0.99.1 documentation and CLI help establish current capabilities. Live reviewer authentication, exact SDK typing, forge delivery, and cold-lifecycle behavior must be verified during implementation. No local source check is presented as live deployment proof.</p>
+<p>Local Pi 0.99.1 documentation and CLI help establish capabilities. Strict SDK typing, real extension registration, Planning guards, temporary Git delivery, process cancellation, lost-response recovery, atomic head rejection, and three-layer base reconciliation are covered by executable checks. GitHub and model workers are simulated in the pipeline harness. Model-backed writer quality, live protected merges, and terminal rendering remain separate live acceptance work. No fixture is presented as deployment proof.</p>
 <p><strong>Questions:</strong> 0) No questions, everything is decided for this implementation. Pascal has said “implement”. Technical uncertainties become executable checks and named blockers, not silent assumptions.</p>
 </section>
 <footer><p>One self-contained HTML file. No external scripts, fonts, stylesheets, or live API dependencies. Linked sources open only on request.</p></footer>

@@ -1,0 +1,70 @@
+{
+  "verdict": "findings",
+  "reviewedHead": "83679d8552d7b33604a482886a0bd973839a53df",
+  "summary": "SHIP-REVIEW-01: Not merge-ready. Reviewed the implementation against origin/main c34f7b37b777948b3b7c639d5f057cea99cff029, including all src files and tests, scripts, package configuration, CI, README, canonical Planning prompt, AC01–16, and relevant installed Pi SDK source. Seven source defects remain open. Read-only probes reproduced premature monitoring success, acceptance of a simulated retargeted merge, repeated stale-base recovery failure, and incorrect path admission. The inspected final-check-06.log records 46 passing tests, TypeScript, Biome, prompt verification, build, and isolated Pi RPC at this HEAD; effectful checks were not rerun. No prior review artifacts were inspected. Live writer behavior, terminal rendering, protected server merging, and macOS CI remain unproven. The reported CI failure before steps is not a successful check, and this review does not resolve the inconclusive native metadata gate. Fix the findings and establish successful required CI before reconsidering conditional merge.",
+  "findings": [
+    {
+      "id": "SHIP-REVIEW-01-R1",
+      "priority": 1,
+      "path": "src/runner.ts",
+      "line": 265,
+      "detail": "Reject external changes before overwriting an approved file. If a user edits that file while the worker is reasoning, saveFile records the user's content as beforeHash and then unconditionally overwrites it. Nothing compares that hash with the committed baseline or the last owned edit. The resulting file subsequently passes attribution and can be committed, silently losing or incorporating unrelated user work. Validate the preimage against owned content before admitting the write.",
+      "disposition": "open",
+      "evidence": "saveFile records beforeHash at line 265 and writes at line 274. beforeHash has no validating consumer anywhere in src. Delivery.assertAttributed at lines 168–180 checks only the latest afterHash, so overwriting external content makes the replacement appear fully attributable."
+    },
+    {
+      "id": "SHIP-REVIEW-01-R2",
+      "priority": 1,
+      "path": "src/delivery.ts",
+      "line": 741,
+      "detail": "Do not treat absent remote evidence as completed monitoring. Both requiredChecks and requiredReviewers default to empty arrays. Immediately after PR publication, GitHub can report no checks or reviews while asynchronous jobs are still starting. Both readiness predicates then return true, and ordinary non-merge delivery finishes permanently before those jobs or bots report failures. Require an explicit remote evidence contract or discover the required gates before monitoring can succeed.",
+      "disposition": "open",
+      "evidence": "defaultConfig sets both requirements to [] in src/contracts.ts:241–242. A read-only in-memory call to the real monitor method with an OPEN, MERGEABLE PR, empty statusCheckRollup, and no reviews returned {kind:'passed'} after exactly one observation. merge immediately passes without observation when merge permission is absent."
+    },
+    {
+      "id": "SHIP-REVIEW-01-R3",
+      "priority": 1,
+      "path": "src/delivery.ts",
+      "line": 802,
+      "detail": "The merge mutation does not bind the approved destination. If the PR is retargeted after the gate's view response, --match-head-commit still matches and gh can merge the same head into a different branch, including one without the protection just inspected. The receipt then checks only MERGED and records success. This violates the run's destination authority. Establish server-enforced destination constraints or block automated merging when that guarantee cannot be established; another preflight read alone does not close the race.",
+      "disposition": "open",
+      "evidence": "The destination/protection snapshot is read at lines 780–797, but the mutation carries only PR number and expected head. Local gh help explicitly defines --match-head-commit as a head-only condition. An in-memory forge probe retargeting between view and mutation made the real merge method return passed and set unit.merged=true for an unapproved destination. This probe establishes the coordinator defect, not live server behavior."
+    },
+    {
+      "id": "SHIP-REVIEW-01-R4",
+      "priority": 2,
+      "path": "src/delivery.ts",
+      "line": 664,
+      "detail": "Provide a supported recovery path when the destination branch advances. A normal unrelated merge into main after preflight makes monitoring reject baseRefOid forever. Resume returns to the same stage without refreshing the recorded base; manually merging main into the workflow branch is also rejected as an unrecorded HEAD change. New approval cannot replace the unfinished run. Preserve the blocking gate, but add explicit reconciliation and revalidation or a supported way to retire the run and replan.",
+      "disposition": "open",
+      "evidence": "An in-memory probe invoked preflight and monitor twice after moving the simulated remote base; both attempts produced 'Remote PR identity or base/head changed; revalidation is required' with unchanged baseHead. preflight resumes the recorded stage at lines 363–366. prepare can refresh a base only for a stack descendant whose predecessor has merged. src/index.ts:183–185 rejects replacement approval."
+    },
+    {
+      "id": "SHIP-REVIEW-01-R5",
+      "priority": 2,
+      "path": "src/index.ts",
+      "line": 338,
+      "detail": "Handle Pi's conversation-tree navigation when maintaining the pending proposal. Recording plan B and then using /tree to return to the branch containing plan A leaves pending set to B. The displayed conversation and proposal digest now disagree, and navigating before any proposal still leaves the abandoned proposal approvable. Restore the proposal from the new branch and invalidate pending approval dialogs on tree navigation.",
+      "disposition": "open",
+      "evidence": "pending is reconstructed from getBranch only during initialize at lines 138–142. The adapter handles session_before_switch, session_before_fork, and session_shutdown, but neither session_before_tree nor session_tree. Installed Pi 0.99.1 agent-session.js:3120–3273 changes the transcript branch through those tree events without emitting session_start."
+    },
+    {
+      "id": "SHIP-REVIEW-01-R6",
+      "priority": 2,
+      "path": "src/policy.ts",
+      "line": 35,
+      "detail": "Use filesystem-consistent canonical paths for scope comparisons. On supported Linux/macOS systems, backslash is a filename character, but scopeAllows treats it as a directory separator. Consequently a scope of src permits creating the repository-root file named src\\probe.ts, outside the approved directory. The same inconsistent normalization accepts ./src as a plan scope but denies its ordinary children. Normalize approved scopes and requested paths consistently before hashing and enforcing them.",
+      "disposition": "open",
+      "evidence": "A read-only call to writablePath(process.cwd(), ['src'], 'src\\\\probe.ts') returned a target whose actual parent was the repository root. validateScope(['./src']) succeeded while scopeAllows(['./src'], 'src/probe.ts') returned false. No files were created."
+    },
+    {
+      "id": "SHIP-REVIEW-01-R7",
+      "priority": 2,
+      "path": "src/delivery.ts",
+      "line": 467,
+      "detail": "Read committed paths with NUL delimiters. git diff-tree --name-only uses quoted output for filenames containing non-ASCII or special characters under normal Git configuration. Splitting that presentation output on newlines and passing it directly to scopeAllows rejects legitimate scoped files such as src/café.ts after their commit has already been created. Use -z and preserve the raw path bytes through parsing.",
+      "disposition": "open",
+      "evidence": "The commit validation invokes diff-tree without -z at line 467 and splits on newline at line 469. Unlike dirty(), which correctly requests porcelain -z, this path receives Git's quoted representation rather than the actual filename; its leading quote prevents matching an approved src prefix."
+    }
+  ]
+}
