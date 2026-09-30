@@ -198,6 +198,23 @@ export type Review = Static<typeof ReviewSchema>;
 export type WorkerResult = Static<typeof WorkerResultSchema>;
 export type Stage = Static<typeof StageSchema>;
 
+// The only copy of the stage order; the machine, resume, and checkpoints read it
+export const NEXT_STAGE = {
+  preflight: "work",
+  work: "commit",
+  commit: "checks",
+  checks: "secondPass",
+  secondPass: "review",
+  review: "publish",
+  repair: "commit",
+  publish: "retrospective",
+  retrospective: "finalizing",
+} as const satisfies Record<Stage, Stage | "finalizing">;
+
+export function isStage(value: string): value is Stage {
+  return Object.hasOwn(NEXT_STAGE, value);
+}
+
 export type StepResult =
   | { kind: "passed"; run: Run; next?: Exclude<Stage, "preflight"> }
   | { kind: "repair"; run: Run; reason: string }
@@ -239,6 +256,16 @@ export function makePlan(input: PlanInput, repository: string): Plan {
   };
   const digest = createHash("sha256").update(JSON.stringify(normalized)).digest("hex");
   return { ...normalized, repository, id: randomUUID(), digest };
+}
+
+// The operator approves exactly this list, so it is never truncated
+export function describeScope(plan: Plan): string {
+  return plan.units
+    .map(
+      (unit, index) =>
+        `${index + 1}. ${unit.title}\n   Writable: ${unit.paths.join(", ")}\n   Commit: ${unit.commitMessage}`,
+    )
+    .join("\n");
 }
 
 export function makeRun(plan: Plan, config: Config): Run {

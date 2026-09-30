@@ -5,6 +5,7 @@ import {
   evidence,
   expectedUnitHead,
   isCurrentEvidence,
+  NEXT_STAGE,
   type Review,
   type Run,
   type Stage,
@@ -92,18 +93,8 @@ export class Delivery {
       run.acceptRecoveredEdits = input.acceptRecoveredEdits;
       const result = await this[stage](run, ownedSignal);
       if (result.kind === "passed") {
-        const next = {
-          preflight: "work",
-          work: "commit",
-          commit: "checks",
-          checks: "secondPass",
-          secondPass: "review",
-          review: "publish",
-          repair: "commit",
-          publish: "retrospective",
-          retrospective: "retrospective",
-        } as const;
-        result.run.resumeStage = result.next ?? next[stage];
+        const next = result.next ?? NEXT_STAGE[stage];
+        result.run.resumeStage = next === "finalizing" ? stage : next;
       } else if (result.kind === "repair") result.run.resumeStage = stage;
       this.journal.write(result.run);
       return result;

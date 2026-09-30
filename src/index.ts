@@ -6,6 +6,7 @@ import { waitFor } from "xstate";
 import {
   ConfigSchema,
   defaultConfig,
+  describeScope,
   makePlan,
   makeRun,
   type Plan,
@@ -122,9 +123,8 @@ export default function journey(pi: ExtensionAPI): void {
       error: (error) => report(error instanceof Error ? error.message : "Coordinator failed"),
     });
     coordinator.start();
-    const prior = store.current();
-    if (prior && !["delivered", "retired"].includes(prior.checkpoint))
-      coordinator.send({ type: "run.recovered", run: prior });
+    const prior = store.unfinished();
+    if (prior) coordinator.send({ type: "run.recovered", run: prior });
     for (const entry of ctx.sessionManager.getBranch()) {
       if (entry.type === "custom" && entry.customType === "journey-plan-cleared")
         pending = undefined;
@@ -162,6 +162,7 @@ export default function journey(pi: ExtensionAPI): void {
       const accepted = await ctx.ui.confirm(
         "Implement the accepted plan?",
         `${proposal.goal}\nDigest: ${proposal.digest}\n\n${proposal.body}\n\n` +
+          `Units and writable scope:\n${describeScope(proposal)}\n\n` +
           `Trusted checks, Git hooks and checkout filters can execute repository code beyond scoped file tools.\n` +
           `${proposal.checks.map((check) => `${check.name}: ${JSON.stringify(check.argv)}\nEffects: ${check.effects}`).join("\n")}\n\n` +
           `Publish ${proposal.delivery === "stack" ? "a linear PR stack" : "a regular PR"} and leave it unmerged.`,
@@ -170,9 +171,7 @@ export default function journey(pi: ExtensionAPI): void {
     }
     if (pending?.digest !== proposal.digest || approvalEpoch !== epoch)
       throw new Error("Plan changed while approval was open");
-    const prior = store.current();
-    if (prior && !["delivered", "retired"].includes(prior.checkpoint))
-      throw new Error("An unfinished run exists; use /journey resume");
+    if (store.unfinished()) throw new Error("An unfinished run exists; use /journey resume");
     const configurationPath = join(repository, ".pi", "journey.json");
     let overrides: unknown = {};
     try {
@@ -213,7 +212,8 @@ export default function journey(pi: ExtensionAPI): void {
           {
             type: "text",
             text:
-              `Plan recorded. Digest ${pending.digest}. The operator can review it with /journey implement ` +
+              `Plan recorded. Digest ${pending.digest}.\n\n${describeScope(pending)}\n\n` +
+              `The operator can review it with /journey implement ` +
               `or approve it with /journey implement ${pending.digest} --allow-checks. No implementation was authorized.`,
           },
         ],
@@ -248,9 +248,8 @@ export default function journey(pi: ExtensionAPI): void {
           if (flags.length) throw new Error("retire takes no arguments");
           if (!actor || !journal || !resources || !ctx.isIdle())
             throw new Error("No idle coordinator is available");
-          const run = journal.current();
-          if (!run || ["delivered", "retired"].includes(run.checkpoint))
-            throw new Error("No unfinished run exists");
+          const run = journal.unfinished();
+          if (!run) throw new Error("No unfinished run exists");
           await stop();
           await journal.acquire(run.id);
           try {
@@ -271,9 +270,8 @@ export default function journey(pi: ExtensionAPI): void {
             throw new Error("No idle coordinator is available");
           if (!idle() && !actor.getSnapshot().matches("blocked"))
             throw new Error("Stop the active run before resuming");
-          const run = journal.current();
-          if (!run || ["delivered", "retired"].includes(run.checkpoint))
-            throw new Error("No unfinished run exists");
+          const run = journal.unfinished();
+          if (!run) throw new Error("No unfinished run exists");
           resources.reset();
           await journal.acquire(run.id);
           if (idle()) actor.send({ type: "run.recovered", run });
@@ -314,9 +312,19 @@ export default function journey(pi: ExtensionAPI): void {
         }
       : undefined,
   );
-  pi.on("session_before_switch", () => stop());
-  pi.on("session_before_fork", () => stop());
-  pi.on("session_before_tree", () => stop());
+  // Pi ignores a throwing handler, so only an explicit cancel keeps undrained work in place
+  const guardNavigation = async () => {
+    try {
+      await stop();
+    } catch (error) {
+      report(error instanceof Error ? error.message : "Owned work did not drain");
+      return { cancel: true };
+    }
+    return undefined;
+  };
+  pi.on("session_before_switch", guardNavigation);
+  pi.on("session_before_fork", guardNavigation);
+  pi.on("session_before_tree", guardNavigation);
   pi.on("session_tree", async (_event, ctx) => {
     await initialize(ctx);
   });

@@ -5,7 +5,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import type { Run } from "../src/contracts.ts";
-import { writeOwnedFile } from "../src/files.ts";
+import { hash, writeOwnedFile } from "../src/files.ts";
 import { Journal } from "../src/journal.ts";
 import { OwnedResources } from "../src/runner.ts";
 import { repository, run } from "./helpers.ts";
@@ -101,3 +101,46 @@ for (const eol of ["lf", "crlf"] as const) {
     }
   });
 }
+
+test("a prepared edit whose bytes landed before a crash admits the next owned write", async () => {
+  const fixture = await repository();
+  const journal = new Journal(fixture.root);
+  const resources = new OwnedResources();
+  try {
+    const record = run(fixture.root);
+    const unit = record.units[0];
+    assert.ok(unit);
+    execFileSync("git", ["-C", fixture.root, "checkout", "-b", unit.branch], { stdio: "ignore" });
+    await mkdir(join(fixture.root, "src"));
+    const path = join(fixture.root, "src/value.ts");
+    await writeFile(path, "Committed content\n");
+    execFileSync("git", ["-C", fixture.root, "add", "src/value.ts"]);
+    execFileSync("git", ["-C", fixture.root, "commit", "-m", "Add baseline"], { stdio: "ignore" });
+    unit.head = execFileSync("git", ["-C", fixture.root, "rev-parse", "HEAD"], {
+      encoding: "utf8",
+    }).trim();
+    record.edits.push({
+      unit: 0,
+      path: "src/value.ts",
+      beforeHash: hash("Committed content\n"),
+      afterHash: hash("Edit written before the crash\n"),
+      state: "prepared",
+    });
+    await journal.acquire(record.id);
+    journal.write(record);
+    await writeFile(path, "Edit written before the crash\n");
+    await writeOwnedFile(
+      record,
+      journal,
+      resources,
+      "src/value.ts",
+      "Edit after recovery\n",
+      new AbortController().signal,
+    );
+    assert.equal(await readFile(path, "utf8"), "Edit after recovery\n");
+  } finally {
+    await resources.drain();
+    await journal.release();
+    await fixture.cleanup();
+  }
+});

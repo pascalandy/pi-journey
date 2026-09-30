@@ -1,5 +1,5 @@
 import { assign, createActor, type DoneActorEvent, fromPromise, setup } from "xstate";
-import type { Run, Stage, StepResult } from "./contracts.ts";
+import { NEXT_STAGE, type Run, type Stage, type StepResult } from "./contracts.ts";
 
 export interface JourneyPorts {
   execute(stage: Stage, run: Run, signal: AbortSignal): Promise<StepResult>;
@@ -73,7 +73,8 @@ export function journeyMachine(ports: JourneyPorts) {
     type: "applyResult" as const,
     params: ({ event }: { event: DoneActorEvent<StepResult> }) => event.output,
   };
-  const step = (stage: Stage, target: string) =>
+  const stages = Object.keys(NEXT_STAGE) as Stage[];
+  const step = (stage: Stage) =>
     configured.createStateConfig({
       entry: { type: "checkpoint", params: stage },
       invoke: {
@@ -104,25 +105,14 @@ export function journeyMachine(ports: JourneyPorts) {
             target: "repair",
             actions: resultAction,
           },
-          ...(
-            [
-              "work",
-              "commit",
-              "checks",
-              "secondPass",
-              "review",
-              "repair",
-              "publish",
-              "retrospective",
-            ] as const
-          ).map((next) => ({
+          ...stages.map((next) => ({
             guard: ({ event }: { event: { output: StepResult } }) =>
               event.output.kind === "passed" && event.output.next === next,
             target: next,
             actions: resultAction,
           })),
           {
-            target,
+            target: NEXT_STAGE[stage],
             actions: resultAction,
           },
         ],
@@ -155,15 +145,10 @@ export function journeyMachine(ports: JourneyPorts) {
           "run.recovered": { target: "blocked", actions: "accept" },
         },
       },
-      preflight: step("preflight", "work"),
-      work: step("work", "commit"),
-      commit: step("commit", "checks"),
-      checks: step("checks", "secondPass"),
-      secondPass: step("secondPass", "review"),
-      review: step("review", "publish"),
-      repair: step("repair", "commit"),
-      publish: step("publish", "retrospective"),
-      retrospective: step("retrospective", "finalizing"),
+      ...(Object.fromEntries(stages.map((stage) => [stage, step(stage)])) as Record<
+        Stage,
+        ReturnType<typeof step>
+      >),
       blocked: {
         entry: ({ context }) => {
           if (context.run !== null) ports.save(context.run, "blocked");

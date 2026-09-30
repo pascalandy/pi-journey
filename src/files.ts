@@ -50,8 +50,9 @@ export async function writeOwnedFile(
   const tracked = await git("--literal-pathspecs", "ls-tree", "-z", "--name-only", head, "--", rel);
   const baseline = tracked ? hash(await git("cat-file", "--filters", `${head}:${rel}`)) : null;
   const beforeHash = await fileHash(safe);
-  const owned = record.edits.findLast((edit) => edit.path === rel && edit.state === "confirmed");
-  if (beforeHash !== baseline && (!owned || beforeHash !== owned.afterHash)) {
+  // A prepared edit counts once its bytes are on disk: the crash came after the write
+  const owned = record.edits.some((edit) => edit.path === rel && edit.afterHash === beforeHash);
+  if (beforeHash !== baseline && !owned) {
     throw new Error(`External change at ${rel}; file preserved`);
   }
   const edit: Run["edits"][number] = {

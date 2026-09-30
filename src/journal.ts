@@ -16,7 +16,7 @@ import { hostname } from "node:os";
 import { join, resolve } from "node:path";
 import lockfile from "proper-lockfile";
 import { Type } from "typebox";
-import { parse, parseRun, type Run, StageSchema } from "./contracts.ts";
+import { isStage, parse, parseRun, type Run } from "./contracts.ts";
 
 const OwnerSchema = Type.Object(
   {
@@ -153,18 +153,7 @@ export class Journal {
     this.write({
       ...latest,
       checkpoint: phase,
-      resumeStage: [
-        "work",
-        "commit",
-        "checks",
-        "secondPass",
-        "review",
-        "repair",
-        "publish",
-        "retrospective",
-      ].includes(phase)
-        ? parse(StageSchema, phase, "resume stage")
-        : latest.resumeStage,
+      resumeStage: isStage(phase) && phase !== "preflight" ? phase : latest.resumeStage,
       repairRounds: run.repairRounds,
       repairReason: run.repairReason,
       acceptRecoveredEdits: run.acceptRecoveredEdits,
@@ -194,6 +183,11 @@ export class Journal {
     if (run === null)
       throw new Error("Active journey record is missing; reconcile it before starting another run");
     return run;
+  }
+
+  unfinished(): Run | null {
+    const run = this.current();
+    return run && !["delivered", "retired"].includes(run.checkpoint) ? run : null;
   }
 
   async release(): Promise<void> {
