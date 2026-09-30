@@ -1,4 +1,3 @@
-# Git hooks: every command is a just recipe, scoped by glob; jobs run in order.
 # Run `just install` once per clone. Docs: https://lefthook.dev
 # Silent on success; a failing job replays its output
 output:
