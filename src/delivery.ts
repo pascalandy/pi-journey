@@ -103,7 +103,7 @@ export class Delivery {
           retrospective: "retrospective",
         } as const;
         result.run.resumeStage = result.next ?? next[stage];
-      } else if (result.kind === "repair") result.run.resumeStage = "repair";
+      } else if (result.kind === "repair") result.run.resumeStage = stage;
       this.journal.write(result.run);
       return result;
     });
@@ -117,6 +117,13 @@ export class Delivery {
 
   private head(signal: AbortSignal) {
     return this.git(["rev-parse", "HEAD"], signal);
+  }
+
+  private async fetchBase(run: Run, signal: AbortSignal): Promise<string> {
+    if (run.originUrl === null) throw new Error("Approved remote URL is absent");
+    const ref = `refs/pi-mode-workflow/${run.id}/base`;
+    await this.git(["fetch", run.originUrl, `refs/heads/${run.config.baseBranch}:${ref}`], signal);
+    return this.git(["rev-parse", ref], signal);
   }
 
   private async assertExpectedHead(run: Run, signal: AbortSignal): Promise<void> {
@@ -321,12 +328,9 @@ export class Delivery {
     }
     if (run.startHead === null) {
       if (dirt.length) throw new Error("Implementation requires a clean repository");
-      await this.git(["fetch", "origin", run.config.baseBranch], signal);
+      const base = await this.fetchBase(run, signal);
       run.startHead = await this.head(signal);
-      if (
-        run.startHead !==
-        (await this.git(["rev-parse", `refs/remotes/origin/${run.config.baseBranch}`], signal))
-      ) {
+      if (run.startHead !== base) {
         throw new Error("Start from the current remote base commit");
       }
       this.journal.write(run);
@@ -369,15 +373,9 @@ export class Delivery {
       unit.baseHead =
         run.plan.delivery === "single" && run.unitIndex > 0
           ? run.startHead
-          : await this.git(
-              [
-                "rev-parse",
-                run.unitIndex === 0
-                  ? `refs/remotes/origin/${run.config.baseBranch}`
-                  : unit.baseBranch,
-              ],
-              signal,
-            );
+          : run.unitIndex === 0
+            ? run.startHead
+            : await this.git(["rev-parse", unit.baseBranch], signal);
       if (run.plan.delivery === "single" && run.unitIndex > 0) return;
       await this.effect(run, "branch", unit.branch, unit.baseHead, async () => {
         await this.git(["checkout", "-b", unit.branch, unit.baseHead ?? ""], signal);
@@ -824,11 +822,7 @@ export class Delivery {
     const descendant = current(run);
     await this.git(["checkout", descendant.branch], signal);
     await this.assertExpectedHead(run, signal);
-    await this.git(["fetch", "origin", run.config.baseBranch], signal);
-    const base = await this.git(
-      ["rev-parse", `refs/remotes/origin/${run.config.baseBranch}`],
-      signal,
-    );
+    const base = await this.fetchBase(run, signal);
     await this.git(["checkout", descendant.branch], signal);
     if (descendant.baseHead !== base || descendant.baseBranch !== run.config.baseBranch) {
       await this.effect(run, "commit", "merge landed ancestor", descendant.head, async () => {
@@ -866,6 +860,8 @@ export class Delivery {
   async retrospective(run: Run, signal: AbortSignal): Promise<StepResult> {
     const unit = current(run);
     if (!unit.head) throw new Error("Retrospective requires a delivery head");
+    await this.git(["checkout", unit.branch], signal);
+    await this.assertCleanHead(unit.head, signal);
     const skill = await readFile(run.config.retrospectiveSkill, "utf8");
     const result = await this.workers.audit(
       run,
