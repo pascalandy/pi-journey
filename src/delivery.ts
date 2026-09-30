@@ -470,14 +470,14 @@ export class Delivery {
       );
     }
     await this.assertCleanHead(unit.head ?? "", signal);
-    const committedPaths = (
-      await this.git(
-        ["diff-tree", "--no-commit-id", "--name-only", "-z", "-r", unit.head ?? ""],
-        signal,
-      )
-    )
-      .split("\0")
-      .filter(Boolean);
+    const changes = await this.resources.command(
+      ["git", "diff-tree", "--no-commit-id", "--name-only", "-z", "-r", unit.head ?? ""],
+      this.repository,
+      signal,
+    );
+    if (changes.code !== 0)
+      throw new Error(`Cannot inspect committed paths: ${changes.stderr.slice(-4000)}`);
+    const committedPaths = changes.stdout.split("\0").filter(Boolean);
     if (committedPaths.some((path) => !scopeAllows(approvedPaths(run), path))) {
       throw new Error(
         "Commit includes paths outside the accepted unit; preserve it for operator review",

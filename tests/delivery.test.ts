@@ -177,6 +177,17 @@ test("coordinator commits attributable scoped edits and preserves unrelated file
     }).trim();
     await journal.acquire(record.id);
     await mkdir(join(fixture.root, "src"));
+    record.plan = makePlan(
+      {
+        ...record.plan,
+        units: record.plan.units.map((unit) => ({
+          ...unit,
+          paths: [...unit.paths, " leading.ts"],
+        })),
+      },
+      fixture.root,
+    );
+    record.grant.planDigest = record.plan.digest;
     await writeFile(join(fixture.root, "src/feature.ts"), "export const value = 1;\n");
     record.edits.push({
       unit: 0,
@@ -185,7 +196,7 @@ test("coordinator commits attributable scoped edits and preserves unrelated file
       afterHash: hash("export const value = 1;\n"),
       state: "confirmed",
     });
-    for (const path of ["src/café.ts", "src/back\\slash.ts", "src/line\nbreak.ts"]) {
+    for (const path of [" leading.ts", "src/café.ts", "src/back\\slash.ts", "src/line\nbreak.ts"]) {
       const content = "export const value = 2;\n";
       await writeFile(join(fixture.root, path), content);
       record.edits.push({
@@ -234,7 +245,7 @@ test("coordinator commits attributable scoped edits and preserves unrelated file
       /value = 1/,
     );
     assert.equal(committed.run.operations.at(-1)?.state, "confirmed");
-    for (const path of ["src/café.ts", "src/back\\slash.ts", "src/line\nbreak.ts"]) {
+    for (const path of [" leading.ts", "src/café.ts", "src/back\\slash.ts", "src/line\nbreak.ts"]) {
       assert.equal(
         execFileSync("git", ["-C", fixture.root, "show", `${committedHead}:${path}`], {
           encoding: "utf8",

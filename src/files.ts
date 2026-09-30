@@ -48,7 +48,7 @@ export async function writeOwnedFile(
   )
     throw new Error("Workflow branch or HEAD changed before owned write");
   const tracked = await git("--literal-pathspecs", "ls-tree", "-z", "--name-only", head, "--", rel);
-  const baseline = tracked ? hash(await git("show", `${head}:${rel}`)) : null;
+  const baseline = tracked ? hash(await git("cat-file", "--filters", `${head}:${rel}`)) : null;
   const beforeHash = await fileHash(safe);
   const owned = record.edits.findLast((edit) => edit.path === rel && edit.state === "confirmed");
   if (beforeHash !== baseline && (!owned || beforeHash !== owned.afterHash)) {

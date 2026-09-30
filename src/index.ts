@@ -174,7 +174,7 @@ export default function modeWorkflow(pi: ExtensionAPI): void {
       const accepted = await ctx.ui.confirm(
         "Implement the accepted plan?",
         `${proposal.goal}\nDigest: ${proposal.digest}\n\n${proposal.body}\n\n` +
-          `Trusted checks and Git hooks can execute repository code beyond scoped file tools.\n` +
+          `Trusted checks, Git hooks and checkout filters can execute repository code beyond scoped file tools.\n` +
           `${proposal.checks.map((check) => `${check.name}: ${JSON.stringify(check.argv)}\nEffects: ${check.effects}`).join("\n")}\n\n` +
           `Publish ${proposal.delivery === "stack" ? "a linear PR stack" : "a regular PR"}. ${merge ? "Auto-merge is authorized for this run." : "Leave PRs unmerged."}`,
       );
