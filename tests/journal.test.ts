@@ -49,10 +49,6 @@ test("a phase checkpoint preserves a prepared external intent from the durable j
     });
     journal.checkpoint(record, "blocked");
     assert.equal(journal.current()?.operations[0]?.state, "prepared");
-    assert.throws(
-      () => parseRun({ ...record, grant: { ...record.grant, planDigest: "different" } }),
-      /stale/,
-    );
     assert.throws(() => parseRun({ ...record, unitIndex: 3 }), /inconsistent/);
   } finally {
     await journal.release();

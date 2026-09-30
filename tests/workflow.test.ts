@@ -15,7 +15,7 @@ test("a run does not start until an operator event approves it", async () => {
     drain: async () => {},
     save: () => {},
   }).start();
-  assert.equal(actor.getSnapshot().value, "planning");
+  assert.equal(actor.getSnapshot().value, "idle");
   assert.deepEqual(stages, []);
   actor.send({ type: "implementation.requested", run: run() });
   await waitFor(actor, (snapshot) => snapshot.matches("delivered"));
@@ -27,14 +27,12 @@ test("a run does not start until an operator event approves it", async () => {
     "secondPass",
     "review",
     "publish",
-    "monitor",
-    "merge",
     "retrospective",
   ]);
   actor.stop();
 });
 
-test("returning to Planning cancels work and waits for resource drainage", async () => {
+test("stopping cancels work and waits for resource drainage", async () => {
   const signals: AbortSignal[] = [];
   const work = Promise.withResolvers<void>();
   const drain = Promise.withResolvers<void>();
@@ -53,14 +51,14 @@ test("returning to Planning cancels work and waits for resource drainage", async
   }).start();
   actor.send({ type: "implementation.requested", run: run() });
   await waitFor(actor, (snapshot) => snapshot.matches("work"));
-  actor.send({ type: "planning.requested" });
+  actor.send({ type: "stop.requested" });
   assert.equal(actor.getSnapshot().value, "stopping");
   assert.equal(signals[0]?.aborted, true);
   work.resolve();
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(actor.getSnapshot().value, "stopping");
   drain.resolve();
-  await waitFor(actor, (snapshot) => snapshot.matches("planning"));
+  await waitFor(actor, (snapshot) => snapshot.matches("idle"));
   assert.deepEqual(stages, ["preflight", "work"]);
   actor.stop();
 });

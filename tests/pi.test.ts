@@ -12,10 +12,9 @@ import {
 import { Type } from "typebox";
 import { defaultConfig, makePlan, makeRun, type PlanInput, parse } from "../src/contracts.ts";
 import modeWorkflow from "../src/index.ts";
-import { PLANNING_FOOTER } from "../src/policy.ts";
 import { repository } from "./helpers.ts";
 
-test("real Pi SDK registers the extension and enforces Planning across tool and shell routes", async () => {
+test("real Pi SDK leaves an idle session unrestricted and binds approval to the visible plan", async () => {
   const fixture = await repository();
   await mkdir(join(fixture.root, ".pi"));
   await writeFile(
@@ -48,29 +47,22 @@ test("real Pi SDK registers the extension and enforces Planning across tool and 
     await session.bindExtensions({});
     const runner = session.extensionRunner;
     assert.ok(runner);
-    for (const name of ["write", "edit", "bash", "codemode", "mcp__arbitrary", "unknown"]) {
-      const denied = await runner.emitToolCall({
+    for (const name of ["write", "edit", "bash", "read"]) {
+      const admitted = await runner.emitToolCall({
         type: "tool_call",
         toolName: name,
         toolCallId: `call-${name}`,
         input: {},
       });
-      assert.equal(denied?.block, true, name);
+      assert.equal(admitted?.block, undefined, name);
     }
-    const read = await runner.emitToolCall({
-      type: "tool_call",
-      toolName: "read",
-      toolCallId: "read",
-      input: { path: "README.md" },
-    });
-    assert.equal(read?.block, undefined);
     const shell = await runner.emitUserBash({
       type: "user_bash",
-      command: "touch forbidden",
+      command: "true",
       cwd: fixture.root,
       excludeFromContext: false,
     });
-    assert.equal(shell?.result?.exitCode, 1);
+    assert.equal(shell?.result, undefined, "an idle session runs its own shell commands");
     assert.equal(runner.getToolDefinition("workflow_plan")?.name, "workflow_plan");
     const plan = runner.getToolDefinition("workflow_plan");
     assert.ok(plan);
@@ -132,10 +124,7 @@ test("real Pi SDK registers the extension and enforces Planning across tool and 
       null,
       "navigating before any proposal clears approval",
     );
-    const retired = makeRun(makePlan(proposal, fixture.root), defaultConfig(), {
-      executeChecks: true,
-      merge: false,
-    });
+    const retired = makeRun(makePlan(proposal, fixture.root), defaultConfig());
     const store = new Journal(fixture.root);
     await store.acquire(retired.id);
     store.write({ ...retired, checkpoint: "blocked" });
@@ -159,31 +148,6 @@ test("real Pi SDK registers the extension and enforces Planning across tool and 
       retired.id,
       "a retired run can be replaced by a fresh approval",
     );
-    await command.handler("plan", runner.createCommandContext());
-    const footer = await runner.emitMessageEnd({
-      type: "message_end",
-      message: {
-        role: "assistant",
-        content: [{ type: "text", text: "The recommended plan" }],
-        api: "openai-responses",
-        provider: "openai",
-        model: "fixture",
-        stopReason: "stop",
-        timestamp: Date.now(),
-        usage: {
-          input: 0,
-          output: 0,
-          cacheRead: 0,
-          cacheWrite: 0,
-          totalTokens: 0,
-          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-        },
-      },
-    });
-    assert.ok(footer?.role === "assistant");
-    assert.deepEqual(footer.content, [
-      { type: "text", text: `The recommended plan\n\n${PLANNING_FOOTER}` },
-    ]);
   } finally {
     await session.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" });
     session.dispose();

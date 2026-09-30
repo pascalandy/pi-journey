@@ -3,33 +3,24 @@ import { link, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
-  appendPlanningFooter,
   MutationQueue,
-  planningAdmission,
+  runAdmission,
   scopeAllows,
   validateScope,
   writablePath,
 } from "../src/policy.ts";
 import { repository } from "./helpers.ts";
 
-test("Planning admits investigation and rejects unknown, nested-execution, and write capabilities", () => {
-  for (const name of ["read", "grep", "find", "ls", "workflow_plan"]) {
-    assert.equal(planningAdmission(name), undefined);
+test("an active run admits investigation and rejects plan, write, and execution tools", () => {
+  for (const name of ["read", "grep", "find", "ls"]) {
+    assert.equal(runAdmission(name), undefined);
   }
-  for (const name of ["write", "edit", "bash", "powershell", "codemode", "tool_search", "other"]) {
-    assert.deepEqual(planningAdmission(name), {
+  for (const name of ["workflow_plan", "write", "edit", "bash", "codemode", "other"]) {
+    assert.deepEqual(runAdmission(name), {
       block: true,
-      reason: "Planning permits investigation and plan recording only",
+      reason: "An active run owns this repository; use /workflow stop first",
     });
   }
-});
-
-test("Planning final text has exactly one literal required footer", () => {
-  assert.equal(appendPlanningFooter("A plan.\n"), "A plan.\n\n— We are in the Planning Phase");
-  assert.equal(
-    appendPlanningFooter("A plan.\n\n— We are in the Planning Phase\n"),
-    "A plan.\n\n— We are in the Planning Phase",
-  );
 });
 
 test("scoped writes reject repository escape, metadata, symlink escape, and hard links", async () => {

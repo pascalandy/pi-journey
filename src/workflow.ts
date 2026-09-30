@@ -3,7 +3,7 @@ import type { Run, Stage, StepResult } from "./contracts.ts";
 
 export interface WorkflowPorts {
   execute(stage: Stage, run: Run, signal: AbortSignal): Promise<StepResult>;
-  drain(outcome: "planning" | "delivered"): Promise<void>;
+  drain(outcome: "stopped" | "delivered"): Promise<void>;
   save(run: Run, state: string): void;
 }
 
@@ -14,7 +14,7 @@ interface Context {
 
 type Event =
   | { type: "implementation.requested"; run: Run }
-  | { type: "planning.requested" }
+  | { type: "stop.requested" }
   | { type: "run.recovered"; run: Run }
   | { type: "run.retired" }
   | { type: "run.resumed"; acceptRecoveredEdits: boolean; run?: Run }
@@ -30,7 +30,7 @@ export function workflowMachine(ports: WorkflowPorts) {
       step: fromPromise<StepResult, { stage: Stage; run: Run }>(async ({ input, signal }) =>
         ports.execute(input.stage, input.run, signal),
       ),
-      drain: fromPromise<void, "planning" | "delivered">(async ({ input }) => ports.drain(input)),
+      drain: fromPromise<void, "stopped" | "delivered">(async ({ input }) => ports.drain(input)),
     },
     actions: {
       accept: assign(({ event }) =>
@@ -113,9 +113,6 @@ export function workflowMachine(ports: WorkflowPorts) {
               "review",
               "repair",
               "publish",
-              "monitor",
-              "merge",
-              "prepare",
               "retrospective",
             ] as const
           ).map((next) => ({
@@ -141,17 +138,17 @@ export function workflowMachine(ports: WorkflowPorts) {
 
   return configured.createMachine({
     id: "modeWorkflow",
-    initial: "planning",
+    initial: "idle",
     context: { run: null, reason: "" },
     on: {
-      "planning.requested": { target: ".stopping" },
+      "stop.requested": { target: ".stopping" },
       "ownership.lost": {
         target: ".stopping",
         actions: assign(({ event }) => ({ reason: event.reason })),
       },
     },
     states: {
-      planning: {
+      idle: {
         on: {
           "run.retired": { actions: assign({ run: null, reason: "" }) },
           "implementation.requested": { target: "preflight", actions: "accept" },
@@ -165,10 +162,7 @@ export function workflowMachine(ports: WorkflowPorts) {
       secondPass: step("secondPass", "review"),
       review: step("review", "publish"),
       repair: step("repair", "commit"),
-      publish: step("publish", "monitor"),
-      monitor: step("monitor", "merge"),
-      merge: step("merge", "retrospective"),
-      prepare: step("prepare", "checks"),
+      publish: step("publish", "retrospective"),
       retrospective: step("retrospective", "finalizing"),
       blocked: {
         entry: ({ context }) => {
@@ -179,8 +173,8 @@ export function workflowMachine(ports: WorkflowPorts) {
       stopping: {
         invoke: {
           src: "drain",
-          input: "planning",
-          onDone: { target: "planning" },
+          input: "stopped",
+          onDone: { target: "idle" },
           onError: {
             target: "stopFailed",
             actions: assign(({ event }) => ({

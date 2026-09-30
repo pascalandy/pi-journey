@@ -2,7 +2,7 @@ node_modules/
 dist/
 coverage/
 *.publish/
-.audit/runtime/
+.audit/
 __pycache__/
 .env
 .env.*

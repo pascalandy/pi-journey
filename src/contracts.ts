@@ -60,10 +60,6 @@ export const ConfigSchema = Type.Object(
     workerTimeoutMs: Type.Integer({ minimum: 1_000, maximum: 3_600_000 }),
     reviewerTimeoutMs: Type.Integer({ minimum: 1_000, maximum: 3_600_000 }),
     maxRepairRounds: Type.Integer({ minimum: 0, maximum: 10 }),
-    pollIntervalMs: Type.Integer({ minimum: 1_000, maximum: 300_000 }),
-    monitorTimeoutMs: Type.Integer({ minimum: 1_000, maximum: 3_600_000 }),
-    requiredChecks: Type.Array(text, { maxItems: 30 }),
-    requiredReviewers: Type.Array(text, { maxItems: 30 }),
   },
   closed,
 );
@@ -109,9 +105,6 @@ export const StageSchema = Type.Union([
   Type.Literal("review"),
   Type.Literal("repair"),
   Type.Literal("publish"),
-  Type.Literal("monitor"),
-  Type.Literal("merge"),
-  Type.Literal("prepare"),
   Type.Literal("retrospective"),
 ]);
 
@@ -136,7 +129,6 @@ export const UnitSchema = Type.Object(
     review: Type.Union([EvidenceSchema, Type.Null()]),
     pr: Type.Union([Type.Integer({ minimum: 1 }), Type.Null()]),
     url: Type.Union([text, Type.Null()]),
-    merged: Type.Boolean(),
   },
   closed,
 );
@@ -149,9 +141,6 @@ export const OperationSchema = Type.Object(
       Type.Literal("commit"),
       Type.Literal("push"),
       Type.Literal("pr"),
-      Type.Literal("retarget"),
-      Type.Literal("merge"),
-      Type.Literal("resolve"),
     ]),
     unit: Type.Integer({ minimum: 0 }),
     expectedHead: Type.Union([sha, Type.Null()]),
@@ -171,15 +160,6 @@ export const RunSchema = Type.Object(
     id: uuid,
     plan: PlanSchema,
     config: ConfigSchema,
-    grant: Type.Object(
-      {
-        planDigest: text,
-        executeChecks: Type.Boolean(),
-        publish: Type.Boolean(),
-        merge: Type.Boolean(),
-      },
-      closed,
-    ),
     startHead: Type.Union([sha, Type.Null()]),
     remoteIdentity: Type.Union([text, Type.Null()]),
     originUrl: Type.Union([text, Type.Null()]),
@@ -237,10 +217,6 @@ export function defaultConfig(): Config {
     workerTimeoutMs: 900_000,
     reviewerTimeoutMs: 900_000,
     maxRepairRounds: 3,
-    pollIntervalMs: 10_000,
-    monitorTimeoutMs: 900_000,
-    requiredChecks: [],
-    requiredReviewers: [],
   };
 }
 
@@ -265,18 +241,13 @@ export function makePlan(input: PlanInput, repository: string): Plan {
   return { ...normalized, repository, id: randomUUID(), digest };
 }
 
-export function makeRun(
-  plan: Plan,
-  config: Config,
-  grant: { executeChecks: boolean; merge: boolean },
-): Run {
+export function makeRun(plan: Plan, config: Config): Run {
   const id = randomUUID();
   return {
     version: 1,
     id,
     plan,
     config,
-    grant: { ...grant, publish: true, planDigest: plan.digest },
     startHead: null,
     remoteIdentity: null,
     originUrl: null,
@@ -293,7 +264,6 @@ export function makeRun(
       review: null,
       pr: null,
       url: null,
-      merged: false,
     })),
     unitIndex: 0,
     repairRounds: 0,
@@ -313,7 +283,6 @@ export function parseRun(value: unknown): Run {
   if (run.units.length !== run.plan.units.length || run.unitIndex >= run.units.length) {
     throw new Error("Workflow record has inconsistent units");
   }
-  if (run.grant.planDigest !== run.plan.digest) throw new Error("Workflow approval is stale");
   if (makePlan(run.plan, run.plan.repository).digest !== run.plan.digest) {
     throw new Error("Accepted plan content changed");
   }

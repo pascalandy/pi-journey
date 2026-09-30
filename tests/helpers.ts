@@ -34,5 +34,5 @@ export function run(root = "/fixture") {
     },
     root,
   );
-  return makeRun(plan, defaultConfig(), { executeChecks: true, merge: false });
+  return makeRun(plan, defaultConfig());
 }

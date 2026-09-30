@@ -1,6 +1,6 @@
 # Working on Pi mode workflow
 
-Read [plan.html](plan.html) for the design and acceptance contract. [README.md](README.md) owns user-facing setup and commands. [prompts/planning.md](prompts/planning.md) owns the literal Planning instructions; run `node scripts/plan-prompt.mjs` after changing that source to refresh its HTML snapshot.
+Read [plan.html](plan.html) for the design and acceptance contract. [README.md](README.md) owns user-facing setup and commands.
 
 Use pnpm, Node 24+, uv, and just. Run `just install` once per clone; it installs dependencies and the lefthook hooks, which run gitleaks and Biome on staged files before each commit and `just check` before each push. Run `just check` before delivery. No model calls, GitHub writes, or daily-driver configuration changes belong in `just check`. Tests own temporary repositories and must preserve unrelated user files.
 

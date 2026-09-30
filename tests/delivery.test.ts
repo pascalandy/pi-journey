@@ -3,10 +3,9 @@ import { execFileSync } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
-import { defaultConfig, evidence, makePlan, makeRun, type Review } from "../src/contracts.ts";
+import { evidence, makePlan, type Review } from "../src/contracts.ts";
 import { acceptReview, Delivery, deliveryTargets } from "../src/delivery.ts";
 import { fileHash, hash } from "../src/files.ts";
-import { checksReady, type PullRequest, reviewersReady, type Threads } from "../src/github.ts";
 import { Journal } from "../src/journal.ts";
 import { OwnedResources } from "../src/runner.ts";
 import { repository, run } from "./helpers.ts";
@@ -72,45 +71,6 @@ test("delivery selects only the final cumulative PR or every ordered stack layer
   assert.deepEqual(deliveryTargets(record), [0, 1]);
 });
 
-test("remote checks and named approvals must be successful at the current head", () => {
-  const pr: PullRequest = {
-    number: 1,
-    url: "https://github.com/example/repo/pull/1",
-    headRefOid: head,
-    baseRefOid: "b".repeat(40),
-    headRefName: "feature",
-    baseRefName: "main",
-    state: "OPEN",
-    isDraft: false,
-    mergeable: "MERGEABLE",
-    mergeStateStatus: "CLEAN",
-    reviewDecision: "APPROVED",
-    statusCheckRollup: [
-      { __typename: "CheckRun", name: "verify", status: "COMPLETED", conclusion: "SUCCESS" },
-    ],
-  };
-  assert.equal(checksReady(pr, ["verify"]), true);
-  assert.equal(checksReady(pr, ["missing"]), false);
-  assert.equal(
-    checksReady(
-      { ...pr, statusCheckRollup: [{ __typename: "CheckRun", name: "verify", status: "QUEUED" }] },
-      ["verify"],
-    ),
-    false,
-  );
-  const threads: Threads = {
-    autoMergeRequest: null,
-    mergeQueueEntry: null,
-    reviewThreads: { pageInfo: { hasNextPage: false }, nodes: [] },
-    reviews: {
-      pageInfo: { hasPreviousPage: false },
-      nodes: [{ author: { login: "reviewer" }, state: "APPROVED", commit: { oid: head } }],
-    },
-  };
-  assert.equal(reviewersReady(threads, head, ["reviewer"]), true);
-  assert.equal(reviewersReady(threads, "b".repeat(40), ["reviewer"]), false);
-});
-
 test("checks certify a real committed tree and reject mutations created by the check", async () => {
   const fixture = await repository();
   const resources = new OwnedResources();
@@ -149,7 +109,6 @@ test("checks certify a real committed tree and reject mutations created by the c
     // Direct stage invocation uses the journal's accepted plan, so install this new fixture before executing.
     const { makePlan } = await import("../src/contracts.ts");
     record.plan = makePlan(record.plan, fixture.root);
-    record.grant.planDigest = record.plan.digest;
     journal.write(record);
     await assert.rejects(
       delivery.execute("checks", record, new AbortController().signal),
@@ -187,7 +146,6 @@ test("coordinator commits attributable scoped edits and preserves unrelated file
       },
       fixture.root,
     );
-    record.grant.planDigest = record.plan.digest;
     await writeFile(join(fixture.root, "src/feature.ts"), "export const value = 1;\n");
     record.edits.push({
       unit: 0,
@@ -265,127 +223,6 @@ test("coordinator commits attributable scoped edits and preserves unrelated file
       committedHead,
     );
     unit.checks = evidence(committedHead, true, "fixture");
-  } finally {
-    await resources.drain();
-    await journal.release();
-    await fixture.cleanup();
-  }
-});
-
-test("resuming a confirmed repair commit propagates it to existing descendants", async () => {
-  const fixture = await repository();
-  class InterruptedCommit extends OwnedResources {
-    interrupted = false;
-    override command(...args: Parameters<OwnedResources["command"]>) {
-      if (!this.interrupted && args[0][0] === "git" && args[0][1] === "diff-tree") {
-        this.interrupted = true;
-        return Promise.resolve({ code: 1, stdout: "", stderr: "Stopped after commit receipt" });
-      }
-      return super.command(...args);
-    }
-  }
-  const resources = new InterruptedCommit();
-  const journal = new Journal(fixture.root);
-  const git = (...args: string[]) =>
-    execFileSync("git", ["-C", fixture.root, ...args], {
-      encoding: "utf8",
-      stdio: ["pipe", "pipe", "pipe"],
-    }).trim();
-  try {
-    const plan = makePlan(
-      {
-        ...run(fixture.root).plan,
-        delivery: "stack",
-        units: [0, 1].map((index) => ({
-          title: `Unit ${index}`,
-          paths: [`src/unit-${index}.ts`],
-          commitMessage: `feat: unit ${index}`,
-        })),
-      },
-      fixture.root,
-    );
-    const record = makeRun(plan, defaultConfig(), { executeChecks: true, merge: false });
-    record.startHead = git("rev-parse", "HEAD");
-    await mkdir(join(fixture.root, "src"));
-    for (const [index, unit] of record.units.entries()) {
-      unit.baseHead = git("rev-parse", "HEAD");
-      git("checkout", "-b", unit.branch);
-      await writeFile(
-        join(fixture.root, `src/unit-${index}.ts`),
-        `export const value = ${index};\n`,
-      );
-      git("add", ".");
-      git("commit", "-m", `feat: initial unit ${index}`);
-      unit.head = git("rev-parse", "HEAD");
-      unit.checks = unit.secondPass = unit.review = evidence(unit.head, true, "Old evidence");
-    }
-    record.unitIndex = 0;
-    record.repairRounds = 1;
-    record.resumeStage = "commit";
-    const first = record.units[0];
-    assert.ok(first);
-    git("checkout", first.branch);
-    const content = "export const value = 42;\n";
-    await writeFile(join(fixture.root, "src/unit-0.ts"), content);
-    record.edits.push({
-      unit: 0,
-      path: "src/unit-0.ts",
-      beforeHash: hash("export const value = 0;\n"),
-      afterHash: hash(content),
-      state: "confirmed",
-    });
-    await journal.acquire(record.id);
-    journal.write(record);
-    const unavailable = async (): Promise<never> => {
-      throw new Error("Unexpected worker invocation");
-    };
-    const delivery = new Delivery(
-      fixture.root,
-      journal,
-      resources,
-      { write: unavailable, audit: unavailable, review: unavailable, preflight: unavailable },
-      () => {},
-    );
-    await assert.rejects(
-      delivery.execute("commit", record, new AbortController().signal),
-      /Stopped after commit receipt/,
-    );
-    const recovered = journal.current();
-    assert.ok(recovered);
-    assert.equal(recovered.operations.at(-1)?.state, "confirmed");
-    const repairHead = recovered.units[0]?.head;
-    const result = await delivery.execute("commit", recovered, new AbortController().signal);
-    assert.equal(result.kind, "passed");
-    const descendant = result.run.units[1];
-    assert.ok(descendant);
-    assert.equal(result.run.unitIndex, 0);
-    assert.equal(
-      result.run.units[0]?.head,
-      repairHead,
-      "recovery does not duplicate the repair commit",
-    );
-    assert.equal(descendant.baseHead, repairHead);
-    assert.equal(git("show", `${descendant.branch}:src/unit-0.ts`), "export const value = 42;");
-    assert.equal(git("show", `${descendant.branch}:src/unit-1.ts`), "export const value = 1;");
-    assert.equal(descendant.checks, null);
-    assert.equal(descendant.secondPass, null);
-    assert.equal(descendant.review, null);
-    assert.equal(result.run.operations.at(-1)?.unit, 1);
-    git("checkout", descendant.branch);
-    await writeFile(join(fixture.root, "external"), "Preserve unrelated descendant commit");
-    git("add", "external");
-    git("commit", "-m", "External descendant change");
-    const externalHead = git("rev-parse", "HEAD");
-    git("checkout", first.branch);
-    await assert.rejects(
-      delivery.execute("commit", result.run, new AbortController().signal),
-      /Committed tree changed/,
-    );
-    assert.equal(git("rev-parse", descendant.branch), externalHead);
-    assert.equal(
-      git("show", `${descendant.branch}:external`),
-      "Preserve unrelated descendant commit",
-    );
   } finally {
     await resources.drain();
     await journal.release();
