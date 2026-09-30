@@ -47,7 +47,6 @@ export default function journey(pi: ExtensionAPI): void {
   let context: ExtensionContext | undefined;
   let control = Promise.resolve();
   let approvalEpoch = 0;
-  // Set while /journey implement waits for the Pi agent to record a plan
   let drafting: { shown: string | undefined } | undefined;
 
   const report = (text: string) =>
@@ -70,7 +69,8 @@ export default function journey(pi: ExtensionAPI): void {
     drafting = next;
     const others = pi.getActiveTools().filter((name) => name !== PLAN_TOOL);
     pi.setActiveTools(drafting ? [...others, PLAN_TOOL] : others);
-    if (idle()) context?.ui.setStatus("journey", drafting ? "Journey | drafting plan" : undefined);
+    if (drafting || idle())
+      context?.ui.setStatus("journey", drafting ? "Journey | drafting plan" : undefined);
   };
   const lockControl = (operation: () => Promise<void>) => {
     const job = control.then(operation);
@@ -162,7 +162,6 @@ export default function journey(pi: ExtensionAPI): void {
     }
   }
 
-  // A new run needs an idle Pi agent, no running stage, and no unfinished run
   function assertReadyForRun(ctx: ExtensionContext): void {
     if (!ctx.isIdle()) throw new Error("Wait for the current response to finish");
     if (!idle() && !actor?.getSnapshot().matches("delivered"))
@@ -172,7 +171,7 @@ export default function journey(pi: ExtensionAPI): void {
 
   async function implement(
     ctx: ExtensionContext,
-    digest: string | undefined,
+    digest: string,
     allowChecks: boolean,
   ): Promise<void> {
     if (!actor || !journal || !resources)
@@ -185,7 +184,7 @@ export default function journey(pi: ExtensionAPI): void {
     const proposal = pending;
     if (!proposal || proposal.repository !== repository)
       throw new Error("Record a plan with journey_plan first");
-    if (digest && digest !== proposal.digest)
+    if (digest !== proposal.digest)
       throw new Error("Plan approval digest does not match the current proposal");
     if (!allowChecks) {
       if (!ctx.hasUI)
@@ -278,7 +277,7 @@ export default function journey(pi: ExtensionAPI): void {
       run: async () => {
         const snapshot = actor?.getSnapshot();
         report(
-          `Phase: ${drafting && idle() ? "drafting plan" : String(snapshot?.value ?? "unavailable")}\n` +
+          `Phase: ${drafting ? "drafting plan" : String(snapshot?.value ?? "unavailable")}\n` +
             `Plan digest: ${pending?.digest ?? "none"}\n${snapshot?.context.reason ?? ""}`,
         );
       },

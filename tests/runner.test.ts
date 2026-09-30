@@ -150,6 +150,7 @@ test("preflight rejects a worker model that only the parent Pi session can resol
     record.config = {
       ...record.config,
       secondPassSkill: skill,
+      impactsSkill: skill,
       retrospectiveSkill: skill,
       reviewerBinary: reviewer,
     };

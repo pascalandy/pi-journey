@@ -11,7 +11,15 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { defaultConfig, makePlan, makeRun, type PlanInput, parse } from "../src/contracts.ts";
+import {
+  defaultConfig,
+  makePlan,
+  makeRun,
+  type PlanInput,
+  parse,
+  type Run,
+} from "../src/contracts.ts";
+import { Delivery } from "../src/delivery.ts";
 import journey from "../src/index.ts";
 import { Journal } from "../src/journal.ts";
 import { repository } from "./helpers.ts";
@@ -27,13 +35,13 @@ const proposal = {
   delivery: "single",
 } satisfies PlanInput;
 
-// Records dialogs; the other methods Pi copies from a bound UI do nothing
+// Pi copies these methods from the bound UI even when a test only observes dialogs or status
 function recordingUI(choose: (options: string[]) => string | undefined = () => undefined) {
   const confirms: { title: string; message: string }[] = [];
   const selects: string[][] = [];
+  const statuses: (string | undefined)[] = [];
   const quiet = [
     "notify",
-    "setStatus",
     "setWorkingMessage",
     "setWorkingVisible",
     "setWorkingIndicator",
@@ -47,6 +55,7 @@ function recordingUI(choose: (options: string[]) => string | undefined = () => u
   ].map((name) => [name, () => {}]);
   const ui = {
     ...Object.fromEntries(quiet),
+    setStatus: (_key: string, value: string | undefined) => statuses.push(value),
     confirm: async (title: string, message: string) => {
       confirms.push({ title, message });
       return false;
@@ -56,7 +65,7 @@ function recordingUI(choose: (options: string[]) => string | undefined = () => u
       return choose(options);
     },
   } as unknown as ExtensionUIContext;
-  return { ui, confirms, selects };
+  return { ui, confirms, selects, statuses };
 }
 
 async function startSession(root: string, uiContext?: ExtensionUIContext) {
@@ -281,6 +290,34 @@ test("the journey picker offers modes, ping reaches the Pi agent, and implement 
     );
     await run("stop");
     assert.equal(session.getActiveToolNames().includes("journey_plan"), false);
+  } finally {
+    await close();
+    await fixture.cleanup();
+  }
+});
+
+test("drafting after delivery replaces the completed phase in status", async (t) => {
+  const fixture = await repository();
+  t.mock.method(Delivery.prototype, "execute", async (_stage: string, run: Run) => ({
+    kind: "passed" as const,
+    run,
+  }));
+  const { ui, statuses } = recordingUI();
+  const { manager, record, run, close } = await startSession(fixture.root, ui);
+  try {
+    const plan = await record(proposal);
+    await run(`implement ${plan.digest} --allow-checks`);
+    const journal = new Journal(fixture.root);
+    const deadline = Date.now() + 5_000;
+    while (journal.current()?.checkpoint !== "delivered" && Date.now() < deadline)
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(journal.current()?.checkpoint, "delivered");
+    await run("implement");
+    assert.equal(statuses.at(-1), "Journey | drafting plan");
+    await run("status");
+    const message = manager.getBranch().findLast((entry) => entry.type === "custom_message");
+    assert.ok(message?.type === "custom_message");
+    assert.match(String(message.content), /^Phase: drafting plan\n/);
   } finally {
     await close();
     await fixture.cleanup();
