@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -62,6 +62,53 @@ test("drain cancels the complete child process group before returning", async ()
     assert.equal(alive, false, "grandchild no longer executes");
   } finally {
     await resources.drain();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("coordinator death stops the owned command before a replacement can resume effects", async () => {
+  if (process.platform === "win32") return;
+  const directory = await mkdtemp(join(tmpdir(), "workflow-owner-death-"));
+  const marker = join(directory, "pid");
+  const program =
+    "require('node:fs').writeFileSync(process.argv[1],String(process.pid));process.on('SIGTERM',()=>{});setInterval(()=>{},1000)";
+  const module = new URL("../src/runner.ts", import.meta.url).href;
+  const coordinator = spawn(
+    process.execPath,
+    [
+      "--experimental-strip-types",
+      "--input-type=module",
+      "-e",
+      `import {OwnedResources} from ${JSON.stringify(module)};const resources=new OwnedResources();await resources.command([process.execPath,'-e',${JSON.stringify(program)},${JSON.stringify(marker)}],${JSON.stringify(directory)},new AbortController().signal);`,
+    ],
+    { stdio: "ignore" },
+  );
+  const exited = new Promise((resolve) => coordinator.once("exit", resolve));
+  try {
+    let pid = 0;
+    for (let attempt = 0; attempt < 300 && !pid; attempt++) {
+      try {
+        pid = Number(await readFile(marker, "utf8"));
+      } catch {}
+      if (!pid) await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.ok(pid > 0, "effectful command started");
+    coordinator.kill("SIGKILL");
+    await exited;
+    let running = true;
+    for (let attempt = 0; attempt < 300 && running; attempt++) {
+      try {
+        running = !execFileSync("ps", ["-o", "stat=", "-p", String(pid)], { encoding: "utf8" })
+          .trim()
+          .startsWith("Z");
+      } catch {
+        running = false;
+      }
+      if (running) await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(running, false, "owned command cannot survive its coordinator");
+  } finally {
+    coordinator.kill("SIGKILL");
     await rm(directory, { recursive: true, force: true });
   }
 });

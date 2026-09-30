@@ -163,6 +163,7 @@ export class Journal {
         "publish",
         "monitor",
         "merge",
+        "prepare",
         "retrospective",
       ].includes(phase)
         ? parse(StageSchema, phase, "resume stage")

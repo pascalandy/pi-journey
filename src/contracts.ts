@@ -110,6 +110,7 @@ export const StageSchema = Type.Union([
   Type.Literal("publish"),
   Type.Literal("monitor"),
   Type.Literal("merge"),
+  Type.Literal("prepare"),
   Type.Literal("retrospective"),
 ]);
 
@@ -179,6 +180,8 @@ export const RunSchema = Type.Object(
       closed,
     ),
     startHead: Type.Union([sha, Type.Null()]),
+    remoteIdentity: Type.Union([text, Type.Null()]),
+    originUrl: Type.Union([text, Type.Null()]),
     units: Type.Array(UnitSchema, { minItems: 1, maxItems: 12 }),
     unitIndex: Type.Integer({ minimum: 0 }),
     repairRounds: Type.Integer({ minimum: 0 }),
@@ -274,6 +277,8 @@ export function makeRun(
     config,
     grant: { ...grant, publish: true, planDigest: plan.digest },
     startHead: null,
+    remoteIdentity: null,
+    originUrl: null,
     units: plan.units.map((_unit, index) => ({
       branch: `workflow/${id.slice(0, 8)}${plan.delivery === "stack" ? `/${index + 1}` : ""}`,
       baseBranch:

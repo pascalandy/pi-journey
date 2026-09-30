@@ -114,6 +114,7 @@ export function workflowMachine(ports: WorkflowPorts) {
               "publish",
               "monitor",
               "merge",
+              "prepare",
               "retrospective",
             ] as const
           ).map((next) => ({
@@ -165,6 +166,7 @@ export function workflowMachine(ports: WorkflowPorts) {
       publish: step("publish", "monitor"),
       monitor: step("monitor", "merge"),
       merge: step("merge", "retrospective"),
+      prepare: step("prepare", "checks"),
       retrospective: step("retrospective", "finalizing"),
       blocked: {
         entry: ({ context }) => {

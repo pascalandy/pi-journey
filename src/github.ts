@@ -29,6 +29,8 @@ const ThreadsSchema = Type.Object({
   data: Type.Object({
     repository: Type.Object({
       pullRequest: Type.Object({
+        autoMergeRequest: Type.Union([Type.Object({ enabledAt: string }), Type.Null()]),
+        mergeQueueEntry: Type.Union([Type.Object({ id: string }), Type.Null()]),
         reviewThreads: Type.Object({
           pageInfo: Type.Object({ hasNextPage: Type.Boolean() }),
           nodes: Type.Array(
@@ -173,7 +175,7 @@ export class GitHub {
     const [owner, name] = identity.split("/");
     if (!owner || !name) throw new Error("Invalid GitHub identity");
     const query = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){
-      pullRequest(number:$number){reviewThreads(first:100){pageInfo{hasNextPage}nodes{
+      pullRequest(number:$number){autoMergeRequest{enabledAt} mergeQueueEntry{id} reviewThreads(first:100){pageInfo{hasNextPage}nodes{
         id isResolved path line comments(first:1){nodes{body url}}}}
         reviews(last:100){pageInfo{hasPreviousPage}nodes{author{login}state commit{oid}}}}}}`;
     const response = parse(

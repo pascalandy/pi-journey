@@ -42,9 +42,7 @@ export function acceptReview(run: Run, review: Review, kind: "secondPass" | "rev
   }
   const open = run.findings.filter(
     (finding) =>
-      finding.id.startsWith(`${run.unitIndex}:`) &&
-      finding.disposition === "open" &&
-      finding.priority <= 2,
+      finding.id.startsWith(prefix) && finding.disposition === "open" && finding.priority <= 2,
   );
   unit[kind] = evidence(
     review.reviewedHead,
@@ -101,6 +99,7 @@ export class Delivery {
           publish: "monitor",
           monitor: "merge",
           merge: "retrospective",
+          prepare: "checks",
           retrospective: "retrospective",
         } as const;
         result.run.resumeStage = result.next ?? next[stage];
@@ -118,6 +117,19 @@ export class Delivery {
 
   private head(signal: AbortSignal) {
     return this.git(["rev-parse", "HEAD"], signal);
+  }
+
+  private async assertExpectedHead(run: Run, signal: AbortSignal): Promise<void> {
+    const unit = current(run);
+    const expected =
+      run.plan.delivery === "single" && run.unitIndex > 0 && unit.head === null
+        ? run.units[run.unitIndex - 1]?.head
+        : (unit.head ?? unit.baseHead ?? run.startHead);
+    if (!expected || (await this.head(signal)) !== expected) {
+      throw new Error(
+        "Workflow HEAD changed outside recorded operations; preserve it for operator review",
+      );
+    }
   }
 
   private async dirty(signal: AbortSignal): Promise<string[]> {
@@ -194,19 +206,27 @@ export class Delivery {
       if (!unit) throw new Error("Operation unit is absent");
       if (intent.kind === "branch") {
         const result = await this.resources.command(
-          ["git", "show-ref", "--verify", `refs/heads/${unit.branch}`],
+          ["git", "show-ref", "--verify", "--quiet", `refs/heads/${unit.branch}`],
           this.repository,
           signal,
         );
         if (result.code !== 0 && result.code !== 1)
           throw new Error("Cannot reconcile branch creation");
-        if (result.code === 0 && !result.stdout.startsWith(`${intent.expectedHead} `)) {
+        if (
+          result.code === 0 &&
+          (await this.git(["rev-parse", `refs/heads/${unit.branch}`], signal)) !==
+            intent.expectedHead
+        ) {
           throw new Error("Uncertain branch creation has an unexpected head");
         }
+        if (result.code === 1) {
+          if (!intent.expectedHead) throw new Error("Branch creation has no recorded base");
+          await this.git(["branch", unit.branch, intent.expectedHead], signal);
+        }
       } else if (intent.kind === "commit") {
-        const head = await this.head(signal);
-        const message = await this.git(["log", "-1", "--format=%B"], signal);
-        const parents = await this.git(["show", "-s", "--format=%P", "HEAD"], signal);
+        const head = await this.git(["rev-parse", `refs/heads/${unit.branch}`], signal);
+        const message = await this.git(["log", "-1", "--format=%B", head], signal);
+        const parents = await this.git(["show", "-s", "--format=%P", head], signal);
         if (
           head !== intent.expectedHead &&
           (!message.includes(`Workflow-Run: ${run.id}`) ||
@@ -217,7 +237,7 @@ export class Delivery {
         if (head !== intent.expectedHead) unit.head = head;
       } else if (intent.kind === "push") {
         const remote = await this.git(
-          ["ls-remote", "--heads", "origin", `refs/heads/${unit.branch}`],
+          ["ls-remote", "--heads", run.originUrl ?? "", `refs/heads/${unit.branch}`],
           signal,
         );
         if (remote && !remote.startsWith(`${intent.expectedHead}\t`)) {
@@ -239,6 +259,11 @@ export class Delivery {
         if (pr.headRefOid !== intent.expectedHead) throw new Error("Uncertain merge head changed");
         if (pr.state === "MERGED") unit.merged = true;
         else if (pr.state !== "OPEN") throw new Error("Uncertain merge needs an operator decision");
+        else {
+          const pending = await this.github.threads(this.identity, unit.pr, signal);
+          if (pending.autoMergeRequest || pending.mergeQueueEntry)
+            throw new Error("A merge is queued remotely; do not replay it");
+        }
       } else if (intent.kind === "resolve") {
         if (unit.pr === null) throw new Error("Thread resolution has no PR");
         const threads = await this.github.threads(this.identity, unit.pr, signal);
@@ -259,9 +284,13 @@ export class Delivery {
   }
 
   async preflight(run: Run, signal: AbortSignal): Promise<StepResult> {
+    if (!["linux", "darwin"].includes(process.platform))
+      throw new Error("Workflow process ownership supports Linux and macOS");
     if (!run.grant.executeChecks)
       return { kind: "blocked", run, reason: "Trusted check execution was not granted" };
     await this.workers.preflight(run, signal);
+    if ((await this.git(["rev-parse", "--show-toplevel"], signal)) !== this.repository)
+      throw new Error("Run workflow from the repository root");
     for (const unit of run.plan.units) validateScope(unit.paths);
     await this.git(["check-ref-format", "--branch", run.config.baseBranch], signal);
     const origin = await this.git(["config", "--get", "remote.origin.url"], signal);
@@ -269,6 +298,11 @@ export class Delivery {
       throw new Error("Workflow delivery requires a GitHub origin using HTTPS or SSH");
     }
     this.identity = await this.github.identity(signal);
+    if (run.remoteIdentity !== null && run.remoteIdentity !== this.identity)
+      throw new Error("Approved remote repository identity changed");
+    run.remoteIdentity = this.identity;
+    run.originUrl ??= origin;
+    this.journal.write(run);
     const originIdentity = origin
       .replace(/^(https:\/\/github\.com\/|git@github\.com:)/, "")
       .replace(/\.git$/, "");
@@ -299,10 +333,24 @@ export class Delivery {
       if (dirt.length) throw new Error("Dirty worktree is on another branch");
       await this.selectUnit(run, signal);
     }
+    await this.assertExpectedHead(run, signal);
     if (dirt.length && !["work", "repair", "commit"].includes(run.resumeStage)) {
       throw new Error(
         "A validation or publication step left dirty files; manual reconciliation is required",
       );
+    }
+    if (run.plan.delivery === "stack" && run.resumeStage === "merge") {
+      const index = run.units.findIndex((unit) => !unit.merged);
+      if (
+        index > 0 &&
+        run.units[index - 1]?.merged &&
+        run.units[index]?.baseBranch !== run.config.baseBranch
+      ) {
+        run.unitIndex = index;
+        await this.selectUnit(run, signal);
+        await this.assertExpectedHead(run, signal);
+        return { kind: "passed", run, next: "prepare" };
+      }
     }
     return {
       kind: "passed",
@@ -334,6 +382,7 @@ export class Delivery {
   }
 
   async work(run: Run, signal: AbortSignal): Promise<StepResult> {
+    await this.assertExpectedHead(run, signal);
     const unit = run.plan.units[run.unitIndex];
     if (!unit) throw new Error("Work unit is absent");
     const result = await this.workers.write(
@@ -350,6 +399,7 @@ export class Delivery {
   }
 
   async repair(run: Run, signal: AbortSignal): Promise<StepResult> {
+    await this.assertExpectedHead(run, signal);
     const unit = run.plan.units[run.unitIndex];
     if (!unit) throw new Error("Repair unit is absent");
     const result = await this.workers.write(
@@ -366,6 +416,7 @@ export class Delivery {
   }
 
   async commit(run: Run, signal: AbortSignal): Promise<StepResult> {
+    await this.assertExpectedHead(run, signal);
     const unit = current(run);
     const paths = await this.dirty(signal);
     await this.assertAttributed(run, paths);
@@ -393,7 +444,7 @@ export class Delivery {
       `scoped unit repair round ${run.repairRounds}`,
       parent,
       async () => {
-        await this.git(["add", "--", ...paths], signal);
+        await this.git(["--literal-pathspecs", "add", "--", ...paths], signal);
         const message = run.plan.units[run.unitIndex]?.commitMessage;
         if (!message) throw new Error("Commit message is absent");
         await this.git(
@@ -524,16 +575,26 @@ export class Delivery {
     for (const index of deliveryTargets(run)) {
       run.unitIndex = index;
       const unit = current(run);
+      if (
+        run.findings.some(
+          (finding) =>
+            finding.id.startsWith(`${index}:`) &&
+            finding.priority <= 2 &&
+            finding.disposition === "open",
+        )
+      ) {
+        throw new Error("Publication has unresolved local review findings");
+      }
       if (!isCurrentEvidence(unit)) throw new Error("Publication has stale or missing evidence");
       await this.git(["checkout", unit.branch], signal);
       await this.assertCleanHead(unit.head ?? "", signal);
       await this.effect(run, "push", unit.branch, unit.head, async () => {
         await this.git(
-          ["push", "origin", `refs/heads/${unit.branch}:refs/heads/${unit.branch}`],
+          ["push", run.originUrl ?? "", `refs/heads/${unit.branch}:refs/heads/${unit.branch}`],
           signal,
         );
         const remote = await this.git(
-          ["ls-remote", "--heads", "origin", `refs/heads/${unit.branch}`],
+          ["ls-remote", "--heads", run.originUrl ?? "", `refs/heads/${unit.branch}`],
           signal,
         );
         if (!remote.startsWith(`${unit.head}\t`))
@@ -710,8 +771,12 @@ export class Delivery {
       const required = await this.github.protectedChecks(this.identity, unit.baseBranch, signal);
       const pr = await this.github.view(unit.pr, signal);
       const threads = await this.github.threads(this.identity, unit.pr, signal);
+      if (threads.autoMergeRequest || threads.mergeQueueEntry)
+        throw new Error("Queued or auto-merge requests require explicit reconciliation");
       if (
         pr.headRefOid !== unit.head ||
+        pr.headRefName !== unit.branch ||
+        pr.baseRefName !== unit.baseBranch ||
         pr.baseRefOid !== unit.baseHead ||
         pr.state !== "OPEN" ||
         pr.isDraft ||
@@ -735,42 +800,53 @@ export class Delivery {
       const descendant = run.units[index + 1];
       if (run.plan.delivery === "stack" && descendant && !descendant.merged) {
         run.unitIndex = index + 1;
-        await this.git(["fetch", "origin", run.config.baseBranch], signal);
-        const base = await this.git(
-          ["rev-parse", `refs/remotes/origin/${run.config.baseBranch}`],
-          signal,
-        );
-        await this.git(["checkout", descendant.branch], signal);
-        await this.effect(run, "commit", "merge landed ancestor", descendant.head, async () => {
-          await this.git(
-            [
-              "merge",
-              "--no-ff",
-              base,
-              "-m",
-              `Merge landed workflow ancestor\n\nWorkflow-Run: ${run.id}`,
-            ],
-            signal,
-          );
-          descendant.head = await this.head(signal);
-          descendant.baseHead = base;
-          descendant.checks = null;
-          descendant.secondPass = null;
-          descendant.review = null;
-        });
-        await this.effect(run, "retarget", run.config.baseBranch, descendant.head, async () => {
-          if (descendant.pr === null) throw new Error("Descendant PR is absent");
-          await this.github.command(
-            ["pr", "edit", String(descendant.pr), "--base", run.config.baseBranch],
-            signal,
-          );
-          descendant.baseBranch = run.config.baseBranch;
-        });
-        await this.propagateDescendants(run, signal);
-        return { kind: "passed", run, next: "checks" };
+        return { kind: "passed", run, next: "prepare" };
       }
     }
     return { kind: "passed", run };
+  }
+
+  async prepare(run: Run, signal: AbortSignal): Promise<StepResult> {
+    const descendant = current(run);
+    await this.git(["checkout", descendant.branch], signal);
+    await this.assertExpectedHead(run, signal);
+    await this.git(["fetch", "origin", run.config.baseBranch], signal);
+    const base = await this.git(
+      ["rev-parse", `refs/remotes/origin/${run.config.baseBranch}`],
+      signal,
+    );
+    await this.git(["checkout", descendant.branch], signal);
+    if (descendant.baseHead !== base || descendant.baseBranch !== run.config.baseBranch) {
+      await this.effect(run, "commit", "merge landed ancestor", descendant.head, async () => {
+        await this.git(
+          [
+            "merge",
+            "--no-ff",
+            base,
+            "-m",
+            `Merge landed workflow ancestor\n\nWorkflow-Run: ${run.id}`,
+          ],
+          signal,
+        );
+        descendant.head = await this.head(signal);
+        descendant.baseHead = base;
+        descendant.checks = null;
+        descendant.secondPass = null;
+        descendant.review = null;
+      });
+    }
+    if (descendant.baseBranch !== run.config.baseBranch) {
+      await this.effect(run, "retarget", run.config.baseBranch, descendant.head, async () => {
+        if (descendant.pr === null) throw new Error("Descendant PR is absent");
+        await this.github.command(
+          ["pr", "edit", String(descendant.pr), "--base", run.config.baseBranch],
+          signal,
+        );
+        descendant.baseBranch = run.config.baseBranch;
+      });
+    }
+    await this.propagateDescendants(run, signal);
+    return { kind: "passed", run, next: "checks" };
   }
 
   async retrospective(run: Run, signal: AbortSignal): Promise<StepResult> {

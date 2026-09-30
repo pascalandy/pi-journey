@@ -98,6 +98,8 @@ test("remote checks and named approvals must be successful at the current head",
     false,
   );
   const threads: Threads = {
+    autoMergeRequest: null,
+    mergeQueueEntry: null,
     reviewThreads: { pageInfo: { hasNextPage: false }, nodes: [] },
     reviews: {
       pageInfo: { hasPreviousPage: false },
@@ -169,6 +171,9 @@ test("coordinator commits attributable scoped edits and preserves unrelated file
     const unit = record.units[0];
     assert.ok(unit);
     execFileSync("git", ["-C", fixture.root, "checkout", "-b", unit.branch], { stdio: "ignore" });
+    unit.baseHead = execFileSync("git", ["-C", fixture.root, "rev-parse", "HEAD"], {
+      encoding: "utf8",
+    }).trim();
     await journal.acquire(record.id);
     await mkdir(join(fixture.root, "src"));
     await writeFile(join(fixture.root, "src/feature.ts"), "export const value = 1;\n");

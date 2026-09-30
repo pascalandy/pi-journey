@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   createAgentSession,
   createEditToolDefinition,
@@ -66,18 +67,31 @@ export class OwnedResources {
       signal,
       (ownedSignal) =>
         new Promise((resolve, reject) => {
-          const [binary, ...args] = argv;
+          const [binary] = argv;
           if (!binary) throw new Error("Command has no executable");
-          const child = spawn(binary, args, {
+          const host = fileURLToPath(
+            new URL(
+              import.meta.url.endsWith(".ts") ? "./process-host.ts" : "./process-host.js",
+              import.meta.url,
+            ),
+          );
+          const child = spawn("node", ["--experimental-strip-types", host], {
             cwd,
             shell: false,
             detached: process.platform !== "win32",
-            stdio: ["pipe", "pipe", "pipe"],
+            stdio: ["pipe", "pipe", "pipe", "ipc"],
             env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GH_PROMPT_DISABLED: "1" },
           });
+          const { stdin: input, stdout: output, stderr: errors } = child;
+          if (!input || !output || !errors) {
+            child.kill("SIGKILL");
+            reject(new Error("Owned process pipes are unavailable"));
+            return;
+          }
           let stdout = "";
           let stderr = "";
           let failure: Error | null = null;
+          let reportedCode: number | undefined;
           let killTimer: ReturnType<typeof setTimeout> | undefined;
           const kill = (signal: NodeJS.Signals) => {
             try {
@@ -102,13 +116,28 @@ export class OwnedResources {
           child.on("error", (error) => {
             failure = error;
           });
-          child.stdin.on("error", () => {});
-          child.stdout.on("data", (chunk: Buffer) => {
+          child.on("message", (value: unknown) => {
+            if (
+              typeof value === "object" &&
+              value !== null &&
+              "type" in value &&
+              value.type === "result" &&
+              "code" in value &&
+              typeof value.code === "number" &&
+              Number.isInteger(value.code) &&
+              value.code >= 0 &&
+              value.code <= 255
+            ) {
+              reportedCode = value.code;
+            }
+          });
+          input.on("error", () => {});
+          output.on("data", (chunk: Buffer) => {
             stdout += chunk.toString();
             if (stdout.length + stderr.length > 2_000_000)
               stop(new Error("Command output limit exceeded"));
           });
-          child.stderr.on("data", (chunk: Buffer) => {
+          errors.on("data", (chunk: Buffer) => {
             stderr += chunk.toString();
             if (stdout.length + stderr.length > 2_000_000)
               stop(new Error("Command output limit exceeded"));
@@ -120,9 +149,13 @@ export class OwnedResources {
             if (failure) {
               kill("SIGKILL");
               reject(failure);
-            } else resolve({ code: code ?? 1, stdout, stderr });
+            } else if (reportedCode !== undefined) resolve({ code: reportedCode, stdout, stderr });
+            else reject(new Error(`Owned process host exited without a result (${code})`));
           });
-          child.stdin.end(stdin);
+          child.send({ type: "start", argv, cwd, stdin: stdin ?? null }, (error) => {
+            if (error && !failure) stop(error);
+          });
+          input.end();
         }),
     );
   }
@@ -399,6 +432,18 @@ export class Workers {
     await writeFile(join(directory, "stderr.txt"), command.stderr, { mode: 0o600 });
     if (command.code !== 0)
       throw new Error(`Independent reviewer failed: ${command.stderr.slice(-4000)}`);
+    if (
+      ![
+        /^model:\s*gpt-6-astra\s*$/m,
+        /^sandbox:\s*read-only\s*$/m,
+        /^approval:\s*never\s*$/m,
+        /^reasoning effort:\s*high\s*$/m,
+      ].every((expected) => expected.test(command.stderr))
+    ) {
+      throw new Error(
+        "Reviewer runtime metadata does not establish Astra high with read-only permissions",
+      );
+    }
     const review = parse(
       ReviewSchema,
       JSON.parse(await readFile(output, "utf8")),
