@@ -1,6 +1,6 @@
 # Working on Pi Journey
 
-Read [plan.html](plan.html) for the design and acceptance contract. [README.md](README.md) owns user-facing setup and commands. [docs/journeys-guides/implementation-v1-1.md](docs/journeys-guides/implementation-v1-1.md) is the guide the `implement` mode recreates; `NEXT_STAGE` in `src/contracts.ts` is the only copy of its stage order.
+Read [plan.html](plan.html) for the design and acceptance contract. [README.md](README.md) owns user-facing setup and commands, and [docs/implement-journey.md](docs/implement-journey.md) owns the implement use case and its diagram. [docs/journeys-guides/implementation-v1-1.md](docs/journeys-guides/implementation-v1-1.md) is the guide the `implement` mode recreates; `NEXT_STAGE` in `src/contracts.ts` is the only copy of its stage order.
 
 Use pnpm, Node 24+, uv, and just. Run `just install` once per clone; it installs dependencies and the lefthook hooks, which run gitleaks and Biome on staged files before each commit and `just check` before each push. Run `just check` before delivery. No model calls, GitHub writes, or daily-driver configuration changes belong in `just check`. Tests own temporary repositories and must preserve unrelated user files.
 

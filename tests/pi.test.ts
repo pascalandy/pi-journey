@@ -307,11 +307,13 @@ test("drafting after delivery replaces the completed phase in status", async (t)
   try {
     const plan = await record(proposal);
     await run(`implement ${plan.digest} --allow-checks`);
-    const journal = new Journal(fixture.root);
+    // The journal records delivery while the coordinator still drains; the status
+    // shows the phase the operator acts on
     const deadline = Date.now() + 5_000;
-    while (journal.current()?.checkpoint !== "delivered" && Date.now() < deadline)
+    while (statuses.at(-1) !== "Journey | delivered" && Date.now() < deadline)
       await new Promise((resolve) => setTimeout(resolve, 10));
-    assert.equal(journal.current()?.checkpoint, "delivered");
+    assert.equal(statuses.at(-1), "Journey | delivered");
+    assert.equal(new Journal(fixture.root).current()?.checkpoint, "delivered");
     await run("implement");
     assert.equal(statuses.at(-1), "Journey | drafting plan");
     await run("status");
