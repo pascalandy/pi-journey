@@ -183,9 +183,14 @@ If you have no questions, write:
 </section>
 
 <section id="sources"><h2>Sources and remaining proof</h2>
+<p>The first implementation review found seven concrete defects in revalidation, process lifetime, and recovery. The fixes add failure cases for each, bind the approved remote, reject unrecorded commits and retargeted destinations, and give stack descendant preparation its own durable state. Forty behavioral tests now pass with strict typing, lint, build, prompt checks, and isolated Pi loading.</p>
+<p>Implementation post-mortem: happy-path fixtures missed recovery boundaries and review progression. The verification harness now kills the coordinator, loses accepted remote responses, and changes state between observation and action. Host-level review permissions are verified from the actual Codex header. Native subagent metadata and a full session transcript were unavailable, so their advice is not presented as enforced sandbox proof.</p>
 <ul>
 <li><a href="https://github.com/statelyai/skills/blob/e7874e5/skills/xstate-v5/SKILL.md">Stately XState v5 skill</a></li>
 <li><a href="https://github.com/joelhooks/pi-until/blob/4096bcb/src/follow-up.ts">Pi Until delivery protocol</a></li>
+<li><a href="https://github.com/joelhooks/pi-bellwether/commit/b98cbed0a22450cc3ffbe5ff4f9178f65cb2e242">Bellwether audit revision</a></li>
+<li><a href="https://github.com/joelhooks/pi-fast-jev-compaction/commit/eb83f533f4fd10a08728b02c062c249afda5a4dc">Fast JEV Compaction audit revision</a></li>
+<li><a href="https://github.com/joelhooks/pi-workflow-os/commit/bfcbf0937d9d8c5ceaf9003da04c18fc8dcf4c89">Workflow OS audit revision</a></li>
 <li><a href="https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md">Pi extension contracts</a></li>
 <li><a href="https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/sdk.md">Pi SDK lifecycle</a></li>
 </ul>

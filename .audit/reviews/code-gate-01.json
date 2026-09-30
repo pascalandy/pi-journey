@@ -1,0 +1,70 @@
+{
+  "verdict": "findings",
+  "reviewedHead": "b4a9d8714503ae6ed0639164a563a8f3d4675d3c",
+  "summary": "CODE-GATE-01: seven concrete findings across review progression, merge authority, and recovery. Reviewed source, tests, scripts, documentation, configuration, CI, and relevant installed Pi SDK code. No files changed, tests/builds run, or remote mutations performed. Supplied validation and unconfirmed live acceptance do not establish a pass.",
+  "findings": [
+    {
+      "id": "CODE-GATE-01-R1",
+      "priority": 1,
+      "path": "src/delivery.ts",
+      "line": 45,
+      "detail": "Independent-review findings prevent their own revalidation. After Codex reports a P0-P2 finding, repairs return through checks and secondPass. Even when that second pass passes, this filter includes the still-open independent-review finding and requests another repair before Codex can run again. Second-pass results cannot resolve it because their IDs receive a different prefix. Gate each review stage on its own findings, retain the complete ledger, and enforce the aggregate gate before publication. Add a pipeline test where Codex finds a defect, the writer fixes it, and Codex subsequently confirms the resolution.",
+      "disposition": "open",
+      "evidence": "acceptReview prefixes updates with `${unitIndex}:${kind}:` at lines 33-41, but selects blockers from every review kind at lines 43-56. workflow.ts routes repair → commit → checks → secondPass → review. The existing delivery test resolves findings by calling acceptReview directly with kind=review, bypassing the blocking second pass."
+    },
+    {
+      "id": "CODE-GATE-01-R2",
+      "priority": 1,
+      "path": "src/delivery.ts",
+      "line": 714,
+      "detail": "The final merge gate does not verify the destination branch. If a PR is retargeted after monitoring to another branch at the same base commit, and its other gates remain green, this condition accepts it. Protection is queried for the recorded branch while gh merges into the PR's actual branch, permitting landing outside the approved destination. Require baseRefName to match unit.baseBranch and validate protection for that verified destination. Add a retarget-between-monitor-and-merge test with identical base SHAs.",
+      "disposition": "open",
+      "evidence": "monitor checks both baseRefName and baseRefOid at lines 593-594. merge queries protection using unit.baseBranch at line 710 but checks only baseRefOid at line 715. The command at line 728 binds the expected head, not the destination branch."
+    },
+    {
+      "id": "CODE-GATE-01-R3",
+      "priority": 1,
+      "path": "src/runner.ts",
+      "line": 74,
+      "detail": "Coordinator death can leave effectful children running while recovery grants ownership to a replacement coordinator. Commands run in detached process groups, but their identities exist only in memory. After the coordinator is killed, a quiet check or Git/GitHub command can survive; once the lease becomes stale, recovery checks only the dead coordinator PID and may retry work alongside that surviving process. Persist sufficient process ownership information and confirm prior jobs have terminated before admitting recovered effects, or enforce child termination on owner death. Add a crash test that kills the coordinator while an effectful child remains alive.",
+      "disposition": "open",
+      "evidence": "OwnedResources tracks promises only in memory at lines 30-55 and launches detached children at lines 71-76. OwnerSchema in journal.ts records only the coordinator PID; acquire checks that PID at lines 107-115. The existing process test exercises cooperative drain with a live coordinator, not coordinator death."
+    },
+    {
+      "id": "CODE-GATE-01-R4",
+      "priority": 1,
+      "path": "src/delivery.ts",
+      "line": 298,
+      "detail": "Recovery accepts an unrecorded committed HEAD before writable stages. Stop a run before work or during a repair, commit an unrelated change on its workflow branch, then resume. A clean worktree and matching branch name pass preflight; the writer's next commit adopts the unexpected commit as its parent, and the scope check examines only that newest commit. Unapproved committed changes can therefore reach publication. Require the recovered HEAD to match the recorded expected head or an explicitly reconciled operation, and verify that expectation again before committing. Add coverage for an unrelated clean commit, alongside the existing dirty-file rejection.",
+      "disposition": "open",
+      "evidence": "Recovery preflight at lines 298-310 checks branch identity and dirty paths without checking HEAD. commit obtains the actual current HEAD as its parent at line 389 and inspects only the resulting commit with diff-tree at lines 413-420. assertAttributed covers dirty paths, not intervening commits."
+    },
+    {
+      "id": "CODE-GATE-01-R5",
+      "priority": 1,
+      "path": "src/delivery.ts",
+      "line": 707,
+      "detail": "Interrupted stack landing can skip required descendant preparation. If the ancestor merge succeeds but its response is lost, or execution stops after recording merged=true and before retargeting the descendant, reconciliation marks the ancestor merged. The resumed merge loop immediately skips it, including the descendant integration, retargeting, and evidence invalidation below. Recovery then either blocks on protection for the old feature branch or, when that branch is protected, merges the descendant into the already-landed feature branch instead of main. Persist and resume descendant preparation independently of the ancestor's merged flag. Add lost-merge-response and post-merge interruption cases to the stack pipeline tests.",
+      "disposition": "open",
+      "evidence": "reconcile sets unit.merged=true for an observed merge at lines 236-240. merge skips merged units at line 707, while all descendant preparation is nested after a newly executed merge at lines 735-770. The existing three-layer test covers uninterrupted landing; lost-response coverage targets PR creation only."
+    },
+    {
+      "id": "CODE-GATE-01-R6",
+      "priority": 2,
+      "path": "src/delivery.ts",
+      "line": 271,
+      "detail": "Recovered approval is not bound to the original remote repository. Changing origin while a run is stopped causes preflight to bind GitHub to the new origin and compare those two current values; it never compares either with the previously approved delivery repository. A run paused before publication can consequently push and create PRs in another repository using its existing grant and evidence. Persist the canonical remote repository identity before effects and reject a changed identity during recovery. Add a resume test that changes origin to a second repository.",
+      "disposition": "open",
+      "evidence": "Delivery.identity is an ephemeral string initialized at line 67 and replaced on every preflight at line 271. Lines 272-276 compare current origin with current GitHub identity only. RunSchema stores the local repository path but no remote identity, while publish pushes to the current origin at line 532."
+    },
+    {
+      "id": "CODE-GATE-01-R7",
+      "priority": 2,
+      "path": "src/delivery.ts",
+      "line": 201,
+      "detail": "Recovery cannot complete a branch creation that was interrupted before Git executed it. The prepared intent already persists baseHead, but the missing-ref query exits 128 and is treated as an unrecoverable inspection error. Merely accepting absence would still leave selectUnit attempting checkout of the nonexistent branch because baseHead is already populated. Distinguish an absent branch from a failed observation and recreate it idempotently at the recorded expected head. Add fault injection between persisting the branch intent and launching checkout.",
+      "disposition": "open",
+      "evidence": "The read-only command `git show-ref --verify refs/heads/__code_gate_01_missing_branch__` returned exit 128 in this checkout. Reconciliation accepts only 0 or 1 at lines 201-202. selectUnit sets baseHead before recording the effect at lines 316-331, then uses plain checkout whenever baseHead is non-null at line 333."
+    }
+  ]
+}

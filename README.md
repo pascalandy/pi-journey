@@ -10,7 +10,7 @@ Implementation runs one Pi writer, commits its changes, runs checks against that
 
 ## Try it
 
-Requirements are Node 24+, pnpm, Pi 0.99.1, Git, authenticated GitHub CLI, an available Pi model, and a logged-in Codex CLI supporting `gpt-6-astra` with high effort. Run from a clean checkout at the current GitHub `origin` base commit. Git identity must already be configured.
+Requirements are Linux or macOS, Node 24+, pnpm, Pi 0.99.1, Git, authenticated GitHub CLI, an available Pi model, and a logged-in Codex CLI supporting `gpt-6-astra` with high effort. Run from a clean repository root at the current GitHub `origin` base commit. Git identity must already be configured.
 
 ```sh
 pnpm install --frozen-lockfile
@@ -55,16 +55,16 @@ Defaults resolve the two skills under `~/.codex/skills/`. Missing skills, review
 
 File tools enforce canonical approved paths, reject repository metadata and escaping symlinks, and serialize the complete edit operation. They cannot sandbox arbitrary repository scripts. Approving checks trusts their declared effects, Git hooks, and the repository code they execute. Read-only tool admission also cannot sandbox other extensions' JavaScript. Controlled workers discover no ambient extensions, skills, prompt templates, themes, or context files.
 
-The journal is under the checkout's Git directory at `pi-mode-workflow/`. It contains the active pointer, validated run records, edit hashes, operation intents, reviewer artifacts, and retrospectives. Keep it private. A process lease prevents two coordinators from owning the same checkout. Reloading or reopening an unfinished run never automatically starts effects.
+The journal is under the checkout's Git directory at `pi-mode-workflow/`. It contains the active pointer, validated run records, edit hashes, operation intents, private check logs, reviewer artifacts, and retrospectives. A process lease prevents two coordinators from owning the same checkout. Each command has an IPC supervisor that kills its process group when the coordinator dies. Reloading or reopening an unfinished run never automatically starts effects.
 
-Recovery inspects Git and GitHub before retrying uncertain operations. Unrelated dirty files are preserved and block continuation. The extension does not reset, delete data, force-push, or silently rebase. Resolve ambiguous changes yourself before resuming. An unfinished run must be resumed instead of replaced by a new approval.
+Recovery inspects Git and GitHub before retrying uncertain operations. It rejects a changed remote repository, unrecorded commits, missing active records, and unattributed dirty files. The extension does not reset, delete data, force-push, or silently rebase. Resolve ambiguous changes yourself before resuming. An unfinished run must be resumed instead of replaced by a new approval.
 
 Ordered units can select `single` delivery for one cumulative PR or `stack` for dependent branches and PRs. Stacks publish bottom-up. Repairs merge ancestor updates into descendants and recheck them. Authorized landing retargets the next layer and invalidates its prior evidence. Conflicts stop with files preserved.
 
-Auto-merge uses `--match-head-commit` and requires classic GitHub branch protection with strict required checks, approving reviews, stale-review dismissal, and enforcement for admins. Missing protection, unsupported ruleset-only policies, missing access, stale base/head evidence, pending checks, or unresolved threads block merging. No admin override is used. Review histories exceeding 100 threads or 100 reviews block for explicit reconciliation.
+Auto-merge uses `--match-head-commit` and requires classic GitHub branch protection with strict required checks, approving reviews, stale-review dismissal, and enforcement for admins. Missing protection, unsupported ruleset-only policies, missing access, changed destinations, stale base/head evidence, pending checks, or unresolved threads block merging. Queued remote merges require explicit reconciliation and are never blindly replayed. No admin override is used. Review histories exceeding 100 threads or 100 reviews block for explicit reconciliation.
 
 ## Verification
 
 `just check` runs strict TypeScript, behavioral tests, Biome, the canonical prompt drift check, the build, and an isolated Pi RPC load. Tests use real temporary Git repositories and process groups. Offline pipeline tests simulate GitHub and workers while exercising actual commits, pushes to a local bare remote, ordered PR publication, and recovery from a lost PR-creation response. SDK tests load the real extension and verify tool guards, shell interception, plan recording, stale approvals, and the finalized footer.
 
-CI runs these checks on Linux and macOS. Model-backed writer quality, remote merge policy enforcement, and interactive terminal rendering require a live acceptance run; offline fixtures do not establish those results. The current delivery PR is left unmerged for Pascal.
+The CI workflow runs these checks on Linux and macOS. Model-backed writer quality, remote merge policy enforcement, and interactive terminal rendering require a live acceptance run; offline fixtures do not establish those results. The delivery PR will remain unmerged for Pascal.
