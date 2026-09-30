@@ -11,8 +11,8 @@
 - [x] Exercise the actual Pi extension in an isolated SDK session
 - [x] Complete documentation and the decision trail
 - [ ] Run a second pass and independent code review and acceptance QA
-- [ ] Open a regular PR and check its CI
-- [ ] Leave the PR unmerged for Pascal
+- [x] Open a regular PR and check its CI
+- [x] Leave the PR unmerged for Pascal
 
 ## Throughput checkpoint
 
@@ -23,6 +23,8 @@
 
 ## Evidence boundary
 
-`just check` covers strict types, 43 behavioral tests, formatting, prompt drift, a build, and isolated Pi RPC loading. The pipeline harness uses real temporary Git commits and remote refs, with simulated GitHub and model workers. It verifies unmerged delivery, lost-response reconciliation, denied protection, atomic head mismatch, changed destinations/remotes/commits, and three-layer landing with interrupted descendant preparation and propagation. Recovery tests also cover a branch switch at the same SHA, a confirmed repair commit, and interrupted advancement to the next unit. The real process test kills the coordinator and proves its command stops. Reviewer protocol tests reject wrong runtime metadata, empty/malformed results, and stale heads. Actual model-backed worker quality and live protected merges remain unconfirmed. CI and the final independent gates follow next.
+The verification suite contains 46 behavioral tests plus strict types, formatting, prompt drift, build, and isolated Pi RPC loading. The pipeline uses real temporary Git commits and remote refs with simulated GitHub and workers. It covers unmerged delivery, lost-response reconciliation, protection/head/destination/remote gates, and three-layer landing with interrupted preparation and propagation. Recovery tests also cover a branch switch at the same SHA, a confirmed repair commit, next-unit advancement, exhausted repair budgets, lower-layer thread triage, and a remote changed during active landing. The real process test kills the coordinator and proves its command stops. Reviewer protocol tests reject wrong runtime metadata, empty/malformed results, and stale heads. Actual model-backed writer quality and live protected merges remain unconfirmed
+
+[PR #1](https://github.com/pascalandy/pi-mode-workflow/pull/1) is regular and unmerged. [GitHub Actions run 36691533191](https://github.com/pascalandy/pi-mode-workflow/actions/runs/36691533191) could not start because account payments failed or the spending limit needs increasing; neither platform executed steps. Local checks and final independent review are reported in the PR description
 
 This checklist is a snapshot before the final candidate review. The PR description owns final review and CI outcomes so those changing results do not invalidate the reviewed source.

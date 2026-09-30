@@ -49,7 +49,7 @@ Optional overrides live in the target repository's `.pi/mode-workflow.json`. Unk
 }
 ```
 
-Defaults resolve the two skills under `~/.codex/skills/`. Missing skills, reviewer capability failures, unavailable permissions, conflicting Git state, and exhausted repair budgets block the run with a reason. Worker and review timeouts default to 15 minutes. Monitoring defaults to 15 minutes with a 10-second interval. See [ConfigSchema](src/contracts.ts) for accepted keys and bounds.
+Defaults resolve the two skills under `~/.codex/skills/`. Missing skills, reviewer capability failures, unavailable permissions, conflicting Git state, and exhausted repair budgets block the run with a reason. Resume rechecks the failed gate and cannot renew an exhausted repair budget. Worker and review timeouts default to 15 minutes. Monitoring defaults to 15 minutes with a 10-second interval. See [ConfigSchema](src/contracts.ts) for accepted keys and bounds.
 
 ## Boundaries and recovery
 
@@ -59,7 +59,7 @@ The journal is under the checkout's Git directory at `pi-mode-workflow/`. It con
 
 Recovery inspects Git and GitHub before retrying uncertain operations. It rejects a changed remote repository, unrecorded commits, missing active records, and unattributed dirty files. The extension does not reset, delete data, force-push, or silently rebase. Resolve ambiguous changes yourself before resuming. An unfinished run must be resumed instead of replaced by a new approval.
 
-Ordered units can select `single` delivery for one cumulative PR or `stack` for dependent branches and PRs. Stacks publish bottom-up. Repairs merge ancestor updates into descendants and recheck them, including recovery after a confirmed repair commit. The journal keeps the causal unit separate from the target of a descendant operation. Authorized landing prepares the next layer only after its predecessor is merged and invalidates its prior evidence. Conflicts stop with files preserved.
+Ordered units can select `single` delivery for one cumulative PR or `stack` for dependent branches and PRs. Stacks publish bottom-up. Repairs merge ancestor updates into descendants and recheck them, including recovery after a confirmed repair commit. The journal keeps the causal unit separate from the target of a descendant operation. Authorized landing prepares the next layer only after its predecessor is merged, fetches its base from the recorded remote URL, and invalidates its prior evidence. Conflicts stop with files preserved.
 
 Auto-merge uses `--match-head-commit` and requires classic GitHub branch protection with strict required checks, approving reviews, stale-review dismissal, and enforcement for admins. Missing protection, unsupported ruleset-only policies, missing access, changed destinations, stale base/head evidence, pending checks, or unresolved threads block merging. Queued remote merges require explicit reconciliation and are never blindly replayed. No admin override is used. Review histories exceeding 100 threads or 100 reviews block for explicit reconciliation.
 
