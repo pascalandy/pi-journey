@@ -121,6 +121,9 @@ export class Delivery {
 
   private async assertExpectedHead(run: Run, signal: AbortSignal): Promise<void> {
     const unit = current(run);
+    if ((await this.git(["branch", "--show-current"], signal)) !== unit.branch) {
+      throw new Error("Workflow branch changed outside recorded operations; files are preserved");
+    }
     const expected =
       run.plan.delivery === "single" && run.unitIndex > 0 && unit.head === null
         ? run.units[run.unitIndex - 1]?.head
@@ -177,12 +180,13 @@ export class Delivery {
     detail: string,
     expectedHead: string | null,
     operation: () => Promise<void>,
+    targetUnit = run.unitIndex,
   ): Promise<void> {
     this.journal.assertOwned(run.id);
     const intent: Run["operations"][number] = {
       id: randomUUID(),
       kind,
-      unit: run.unitIndex,
+      unit: targetUnit,
       expectedHead,
       state: "prepared",
       detail,
@@ -428,38 +432,38 @@ export class Delivery {
           item.unit === run.unitIndex &&
           item.detail === `scoped unit repair round ${run.repairRounds}`,
       );
-      if (receipt?.state === "confirmed" && (await this.head(signal)) === unit.head) {
-        return { kind: "passed", run };
+      if (receipt?.state !== "confirmed") {
+        return {
+          kind: "blocked",
+          run,
+          reason: "Repair made no changes; another decision is required",
+        };
       }
-      return {
-        kind: "blocked",
+    } else {
+      const parent = await this.head(signal);
+      await this.effect(
         run,
-        reason: "Repair made no changes; another decision is required",
-      };
+        "commit",
+        `scoped unit repair round ${run.repairRounds}`,
+        parent,
+        async () => {
+          await this.git(["--literal-pathspecs", "add", "--", ...paths], signal);
+          const message = run.plan.units[run.unitIndex]?.commitMessage;
+          if (!message) throw new Error("Commit message is absent");
+          await this.git(
+            [
+              "commit",
+              "-m",
+              message,
+              "-m",
+              `Workflow-Run: ${run.id}\nWorkflow-Unit: ${run.unitIndex + 1}`,
+            ],
+            signal,
+          );
+          unit.head = await this.head(signal);
+        },
+      );
     }
-    const parent = await this.head(signal);
-    await this.effect(
-      run,
-      "commit",
-      `scoped unit repair round ${run.repairRounds}`,
-      parent,
-      async () => {
-        await this.git(["--literal-pathspecs", "add", "--", ...paths], signal);
-        const message = run.plan.units[run.unitIndex]?.commitMessage;
-        if (!message) throw new Error("Commit message is absent");
-        await this.git(
-          [
-            "commit",
-            "-m",
-            message,
-            "-m",
-            `Workflow-Run: ${run.id}\nWorkflow-Unit: ${run.unitIndex + 1}`,
-          ],
-          signal,
-        );
-        unit.head = await this.head(signal);
-      },
-    );
     await this.assertCleanHead(unit.head ?? "", signal);
     const committedPaths = (
       await this.git(["diff-tree", "--no-commit-id", "--name-only", "-r", unit.head ?? ""], signal)
@@ -484,27 +488,32 @@ export class Delivery {
       const descendant = run.units[index];
       const ancestor = run.units[index - 1];
       if (!descendant || !ancestor || descendant.head === null) break;
-      const selected = run.unitIndex;
-      run.unitIndex = index;
       await this.git(["checkout", descendant.branch], signal);
-      await this.effect(run, "commit", "propagate ancestor", descendant.head, async () => {
-        await this.git(
-          [
-            "merge",
-            "--no-ff",
-            ancestor.branch,
-            "-m",
-            `Merge updated workflow ancestor\n\nWorkflow-Run: ${run.id}`,
-          ],
-          signal,
-        );
-        descendant.head = await this.head(signal);
-        descendant.baseHead = ancestor.head;
-        descendant.checks = null;
-        descendant.secondPass = null;
-        descendant.review = null;
-      });
-      run.unitIndex = selected;
+      await this.assertCleanHead(descendant.head, signal);
+      await this.effect(
+        run,
+        "commit",
+        "propagate ancestor",
+        descendant.head,
+        async () => {
+          await this.git(
+            [
+              "merge",
+              "--no-ff",
+              ancestor.branch,
+              "-m",
+              `Merge updated workflow ancestor\n\nWorkflow-Run: ${run.id}`,
+            ],
+            signal,
+          );
+          descendant.head = await this.head(signal);
+          descendant.baseHead = ancestor.head;
+          descendant.checks = null;
+          descendant.secondPass = null;
+          descendant.review = null;
+        },
+        index,
+      );
     }
     await this.git(["checkout", unit.branch], signal);
   }
@@ -564,8 +573,10 @@ export class Delivery {
     if (accepted.kind !== "passed") return accepted;
     if (run.unitIndex + 1 < run.units.length) {
       run.unitIndex++;
+      const next = current(run).head === null ? "work" : "checks";
+      run.resumeStage = next;
       await this.selectUnit(run, signal);
-      return { kind: "passed", run, next: current(run).head === null ? "work" : "checks" };
+      return { kind: "passed", run, next };
     }
     return accepted;
   }
@@ -807,6 +818,9 @@ export class Delivery {
   }
 
   async prepare(run: Run, signal: AbortSignal): Promise<StepResult> {
+    if (run.plan.delivery !== "stack" || !run.units[run.unitIndex - 1]?.merged) {
+      throw new Error("Descendant preparation requires its predecessor to be merged");
+    }
     const descendant = current(run);
     await this.git(["checkout", descendant.branch], signal);
     await this.assertExpectedHead(run, signal);

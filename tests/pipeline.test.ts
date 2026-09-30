@@ -18,8 +18,10 @@ const scenarios: readonly {
   loseMergeResponse?: boolean;
   reviewDefect?: boolean;
   missingBranch?: boolean;
+  missingNextBranch?: boolean;
   recoveryChange?: "head" | "remote";
   stopPreparation?: boolean;
+  stopPropagation?: boolean;
 }[] = [
   { deliveryMode: "single", loseCreateResponse: false, mergeMode: "none" },
   { deliveryMode: "stack", loseCreateResponse: false, mergeMode: "none" },
@@ -34,6 +36,8 @@ const scenarios: readonly {
   { deliveryMode: "single", mergeMode: "none", recoveryChange: "head" },
   { deliveryMode: "single", mergeMode: "none", recoveryChange: "remote" },
   { deliveryMode: "stack", mergeMode: "land", stopPreparation: true },
+  { deliveryMode: "stack", mergeMode: "land", stopPropagation: true },
+  { deliveryMode: "stack", mergeMode: "none", missingNextBranch: true },
 ];
 for (const {
   deliveryMode,
@@ -42,18 +46,21 @@ for (const {
   loseMergeResponse = false,
   reviewDefect = false,
   missingBranch = false,
+  missingNextBranch = false,
   recoveryChange,
   stopPreparation = false,
+  stopPropagation = false,
 } of scenarios) {
-  test(`full ${deliveryMode}, merge=${mergeMode}, lost create=${loseCreateResponse}, lost merge=${loseMergeResponse}, repair=${reviewDefect}, missing branch=${missingBranch}, changed=${recoveryChange}, prepare interruption=${stopPreparation}`, async () => {
+  test(`full ${deliveryMode}, merge=${mergeMode}, lost create=${loseCreateResponse}, lost merge=${loseMergeResponse}, repair=${reviewDefect}, missing branch=${missingBranch || missingNextBranch}, changed=${recoveryChange}, prepare interruption=${stopPreparation}, propagation interruption=${stopPropagation}`, async () => {
     const fixture = await repository();
     const originalPath = process.env.PATH;
     class InterruptedBranch extends OwnedResources {
       interrupted = false;
       stoppedPreparation = false;
+      stoppedPropagation = false;
       override command(...args: Parameters<OwnedResources["command"]>) {
         if (
-          missingBranch &&
+          (missingBranch || (missingNextBranch && journal.current()?.unitIndex === 1)) &&
           !this.interrupted &&
           args[0][0] === "git" &&
           args[0][1] === "checkout" &&
@@ -64,6 +71,24 @@ for (const {
             code: 1,
             stdout: "",
             stderr: "Interrupted before branch creation",
+          });
+        }
+        const saved = journal.current();
+        if (
+          stopPropagation &&
+          !this.stoppedPropagation &&
+          saved !== null &&
+          args[0][0] === "git" &&
+          args[0][1] === "checkout" &&
+          args[0][2] === saved?.units[1]?.branch &&
+          saved.operations.at(-1)?.detail === "propagate ancestor" &&
+          saved.operations.at(-1)?.state === "confirmed"
+        ) {
+          this.stoppedPropagation = true;
+          return Promise.resolve({
+            code: 1,
+            stdout: "",
+            stderr: "Stopped after propagation receipt",
           });
         }
         if (
@@ -298,15 +323,33 @@ fs.writeFileSync(file,JSON.stringify(state));process.stdout.write(typeof result=
           );
         return;
       }
-      if (loseCreateResponse || loseMergeResponse || missingBranch || stopPreparation) {
+      if (
+        loseCreateResponse ||
+        loseMergeResponse ||
+        missingBranch ||
+        missingNextBranch ||
+        stopPreparation ||
+        stopPropagation
+      ) {
         assert.equal(final.value, "blocked");
         const recovered = journal.current();
         assert.ok(recovered);
         assert.equal(
           recovered.operations.at(-1)?.state,
-          stopPreparation ? "confirmed" : "uncertain",
+          stopPreparation || stopPropagation ? "confirmed" : "uncertain",
         );
         if (stopPreparation) assert.equal(recovered.resumeStage, "prepare");
+        if (stopPropagation) {
+          assert.equal(recovered.unitIndex, 1, "the causal unit survives descendant effects");
+          assert.equal(
+            recovered.operations.at(-1)?.unit,
+            2,
+            "the effect names its descendant target",
+          );
+          assert.equal(recovered.resumeStage, "prepare");
+          assert.equal(recovered.units[1]?.merged, false);
+        }
+        if (missingNextBranch) assert.equal(recovered.resumeStage, "work");
         resources.reset();
         actor.send({ type: "run.resumed", run: recovered, acceptRecoveredEdits: false });
         final = await waitFor(
