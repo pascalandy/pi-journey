@@ -40,13 +40,13 @@ The session is yours whenever no stage runs. While a stage runs, the Pi agent ke
 
 ## The implement journey
 
-`preflight` → for each unit: `work` → `commit` → `checks` → `secondPass` → `impacts` → `publish` → `retrospective` → delivered
+`preflight` → for each unit: `work` → `commit` → `checks` → `secondPass` → `impacts`; then, once every unit passes: `publish` → `retrospective` → delivered
 
 - `work`: one Pi worker edits only the unit's approved paths; the coordinator commits the result
 - `checks`: the coordinator runs the plan's checks against the committed tree and rejects checks that change it
 - `secondPass`: a read-only Pi worker follows the 2nd-pass skill and writes its own premortem
 - `impacts`: a read-only Codex run applies the blast-radius skill and a premortem to the unit's diff
-- `publish`: push each branch and open one regular PR, or one PR per unit for a stack
+- `publish`: push each branch and open one regular PR, or one PR per unit for a stack; a PR counts only while it is open on the recorded base and head
 - `retrospective`: a read-only Pi worker follows the pa-retro skill; its result stays in the journal
 
 Open P0 to P2 findings send the unit through repair, up to `maxRepairRounds`. A journey ends with the PRs open and unmerged. Merging belongs to the project, for example with its own `just merge`. The guide's polish review, confidence report, merge gate, and issue filing are not part of the journey yet.
@@ -89,3 +89,5 @@ Recovery inspects Git and GitHub before retrying uncertain operations. It reject
 Run `just install` once per clone. It installs dependencies and the lefthook hooks: gitleaks and Biome on staged files before each commit, and `just check` before each push. The GitHub Actions workflow runs `just check` on Linux and macOS only when started by hand with `gh workflow run ci.yml --ref <branch>`.
 
 A PR merges into `main` only with a green `signoff` status on its head commit. Push the branch, then run `just signoff`: it installs, runs `just check` and `just gitleaks`, and posts the status on the tested commit. `just merge` signs off the PR head and merges exactly that commit. `just signoff-setup` installs the rule once per repository, and `just signoff-check` verifies it. Both scripts come from pascalandy-blog-paper and need `uv`, `gitleaks`, and the `gh signoff` extension (`gh extension install basecamp/gh-signoff`).
+
+`just merge` checks the PR's base and `main` right before it merges, but `--match-head-commit` pins only the head. A retarget, or another merge into `main`, in the seconds between that last check and GitHub's merge can land a tree the checks never built. The script reports a wrong destination afterward and cannot undo it. An admin token bypasses repository rules, so only a non-admin merging identity or a merge queue closes this window.
