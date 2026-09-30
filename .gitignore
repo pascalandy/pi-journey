@@ -3,5 +3,6 @@ dist/
 coverage/
 *.publish/
 .audit/runtime/
+__pycache__/
 .env
 .env.*

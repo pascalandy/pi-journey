@@ -70,4 +70,10 @@ Known release blocker: the merge request pins the head SHA but cannot atomically
 
 `just check` runs strict TypeScript, behavioral tests, Biome, the canonical prompt drift check, the build, and an isolated Pi RPC load. Tests use real temporary Git repositories and process groups. Offline pipeline tests simulate GitHub and workers while exercising actual commits, pushes to a local bare remote, ordered PR publication, and recovery from a lost PR-creation response. SDK tests load the real extension and verify tool guards, shell interception, plan recording, stale approvals, and the finalized footer.
 
-The CI workflow runs these checks on Linux and macOS. Model-backed writer quality, remote merge policy enforcement, and interactive terminal rendering require a live acceptance run; offline fixtures do not establish those results. The delivery PR will remain unmerged for Pascal.
+It also runs the standard-library tests of `scripts/signoff.py` and `scripts/merge.py` against a bare origin and a fake `gh`. Model-backed writer quality, remote merge policy enforcement, and interactive terminal rendering require a live acceptance run; offline fixtures do not establish those results.
+
+## Develop
+
+Run `just install` once per clone. It installs dependencies and the lefthook hooks: gitleaks and Biome on staged files before each commit, and `just check` before each push. The GitHub Actions workflow runs `just check` on Linux and macOS only when started by hand with `gh workflow run ci.yml --ref <branch>`.
+
+A PR merges into `main` only with a green `signoff` status on its head commit. Push the branch, then run `just signoff`: it installs, runs `just check` and `just gitleaks`, and posts the status on the tested commit. `just merge` signs off the PR head and merges exactly that commit. `just signoff-setup` installs the rule once per repository, and `just signoff-check` verifies it. Both scripts come from pascalandy-blog-paper and need `uv`, `gitleaks`, and the `gh signoff` extension (`gh extension install basecamp/gh-signoff`).
