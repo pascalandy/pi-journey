@@ -21,7 +21,7 @@
 <nav aria-label="Plan sections"><a href="#modes">Modes</a><a href="#implement">Implement</a><a href="#ownership">Ownership</a><a href="#checks">Local checks</a><a href="#verification">Verification</a><a href="#premortem">Premortem</a><a href="#next">Next</a></nav>
 
 <section id="modes"><h2>Modes and the operator's controls</h2>
-<p>The extension restricts nothing while no stage runs. It registers one command, <code>/journey</code>. Bare <code>/journey</code> opens a picker; <code>/journey &lt;name&gt;</code> skips it, and Tab completes the names. One command table in <code>src/index.ts</code> feeds the picker, the completions, and dispatch, so a new mode is one entry.</p>
+<p><a href="docs/implement-journey.md">The implement journey</a> walks through this use case with a mental model and a diagram. The extension restricts nothing while no stage runs. It registers one command, <code>/journey</code>. Bare <code>/journey</code> opens a picker; <code>/journey &lt;name&gt;</code> skips it, and Tab completes the names. One command table in <code>src/index.ts</code> feeds the picker, the completions, and dispatch, so a new mode is one entry.</p>
 <div class="table-wrap"><table>
 <thead><tr><th>Entry</th><th>Kind</th><th>Behavior</th></tr></thead>
 <tbody>
@@ -77,11 +77,12 @@ stop or navigation → stopping → idle, after a confirmed drain</pre>
 <tr><td>AC-09</td><td>The impacts reviewer runs read-only with its configured model and effort, and rejects malformed or stale results</td><td><code>tests/reviewer.test.ts</code></td></tr>
 <tr><td>AC-10</td><td>Repairs invalidate evidence and stop at the budget, even across resume</td><td><code>tests/journey.test.ts</code>, <code>tests/pipeline.test.ts</code></td></tr>
 <tr><td>AC-11</td><td>Recovery reconciles uncertain branch, commit, and PR effects without duplicates</td><td><code>tests/pipeline.test.ts</code></td></tr>
-<tr><td>AC-12</td><td>An interrupted owned edit is accepted; unrelated dirty files stay blocked</td><td><code>tests/files.test.ts</code>, <code>tests/delivery.test.ts</code></td></tr>
+<tr><td>AC-12</td><td>An interrupted owned edit is accepted; an older owned version and unrelated dirty files stay blocked</td><td><code>tests/files.test.ts</code>, <code>tests/delivery.test.ts</code></td></tr>
 <tr><td>AC-13</td><td>A worker model the worker session cannot load blocks preflight</td><td><code>tests/runner.test.ts</code></td></tr>
 <tr><td>AC-14</td><td>Delivery publishes ordered PRs and leaves the base branch unmerged</td><td><code>tests/pipeline.test.ts</code></td></tr>
 <tr><td>AC-15</td><td>One coordinator owns a checkout, and a killed coordinator stops its commands</td><td><code>tests/journal.test.ts</code>, <code>tests/runner.test.ts</code></td></tr>
 <tr><td>AC-16</td><td>Actual Pi loads <code>/journey</code> without changing installed settings</td><td><code>scripts/verify.ts</code></td></tr>
+<tr><td>AC-17</td><td>A published PR counts only while it is open on its recorded base and head</td><td><code>tests/pipeline.test.ts</code></td></tr>
 </tbody></table></div>
 <p>Tests call the code the way Pi and the operator do and assert observable results. Temporary Git repositories and real process groups own filesystem and lifetime behavior. GitHub and model workers are simulated, so model-backed writer quality and terminal rendering need a live run.</p>
 </section>
