@@ -19,6 +19,18 @@ export async function fileHash(path: string): Promise<string | null> {
   }
 }
 
+// A crash can leave either side of a prepared write; confirmation admits only its output
+export function matchesOwnedEdit(
+  edit: Run["edits"][number] | undefined,
+  contentHash: string | null,
+): boolean {
+  return (
+    edit !== undefined &&
+    (contentHash === edit.afterHash ||
+      (edit.state === "prepared" && contentHash === edit.beforeHash))
+  );
+}
+
 export async function writeOwnedFile(
   run: Run,
   journal: Journal,
@@ -50,14 +62,8 @@ export async function writeOwnedFile(
   const tracked = await git("--literal-pathspecs", "ls-tree", "-z", "--name-only", head, "--", rel);
   const baseline = tracked ? hash(await git("cat-file", "--filters", `${head}:${rel}`)) : null;
   const beforeHash = await fileHash(safe);
-  // The file is owned when it holds the latest edit, including a prepared edit whose
-  // bytes landed before a crash, or the latest confirmed edit when the crash came first.
-  // An older owned version is an external rollback and stays preserved
-  const edits = record.edits.filter((edit) => edit.path === rel);
-  const owned = [edits.at(-1), edits.findLast((edit) => edit.state === "confirmed")].some(
-    (edit) => edit?.afterHash === beforeHash,
-  );
-  if (beforeHash !== baseline && !owned) {
+  const latest = record.edits.findLast((edit) => edit.path === rel);
+  if (beforeHash !== baseline && !matchesOwnedEdit(latest, beforeHash)) {
     throw new Error(`External change at ${rel}; file preserved`);
   }
   const edit: Run["edits"][number] = {

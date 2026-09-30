@@ -11,7 +11,7 @@ import {
   type Stage,
   type StepResult,
 } from "./contracts.ts";
-import { fileHash } from "./files.ts";
+import { fileHash, matchesOwnedEdit } from "./files.ts";
 import { GitHub } from "./github.ts";
 import type { Journal } from "./journal.ts";
 import { approvedPaths, scopeAllows, validateScope } from "./policy.ts";
@@ -157,13 +157,10 @@ export class Delivery {
   private async assertAttributed(run: Run, paths: string[]): Promise<void> {
     const approved = approvedPaths(run);
     for (const path of paths) {
-      const edit = run.edits
-        .filter((item) => item.unit === run.unitIndex && item.path === path)
-        .at(-1);
+      const edit = run.edits.findLast((item) => item.unit === run.unitIndex && item.path === path);
       if (
         !scopeAllows(approved, path) ||
-        !edit ||
-        (await fileHash(join(this.repository, path))) !== edit.afterHash
+        !matchesOwnedEdit(edit, await fileHash(join(this.repository, path)))
       ) {
         throw new Error(`Unattributed repository change: ${path}. Files have been preserved`);
       }
@@ -252,7 +249,6 @@ export class Delivery {
     }
   }
 
-  // A PR belongs to the run only while it is open on the recorded base and head
   private async adoptPr(
     unit: Run["units"][number],
     number: number,
