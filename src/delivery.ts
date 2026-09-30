@@ -245,18 +245,29 @@ export class Delivery {
         }
       } else {
         const number = await this.github.find(unit.branch, signal);
-        if (number !== null) {
-          const pr = await this.github.view(number, signal);
-          if (pr.headRefOid !== intent.expectedHead || pr.baseRefName !== unit.baseBranch) {
-            throw new Error("Uncertain PR creation has an unexpected target");
-          }
-          unit.pr = pr.number;
-          unit.url = pr.url;
-        }
+        if (number !== null) await this.adoptPr(unit, number, intent.expectedHead, signal);
       }
       intent.state = "confirmed";
       this.journal.write(run);
     }
+  }
+
+  // A PR belongs to the run only while it is open on the recorded base and head
+  private async adoptPr(
+    unit: Run["units"][number],
+    number: number,
+    head: string | null,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const pr = await this.github.view(number, signal);
+    if (pr.state !== "OPEN" || pr.headRefOid !== head || pr.baseRefName !== unit.baseBranch) {
+      throw new Error(
+        `PR #${number} is ${pr.state.toLowerCase()} on ${pr.baseRefName} at ${pr.headRefOid.slice(0, 7)}; ` +
+          `expected an open PR on ${unit.baseBranch} at ${head?.slice(0, 7)}. Reconcile it before resuming`,
+      );
+    }
+    unit.pr = pr.number;
+    unit.url = pr.url;
   }
 
   async preflight(run: Run, signal: AbortSignal): Promise<StepResult> {
@@ -525,10 +536,8 @@ export class Delivery {
           throw new Error("Remote did not confirm the pushed head");
       });
       const found = await this.github.find(unit.branch, signal);
-      if (found !== null) {
-        unit.pr = found;
-        unit.url = (await this.github.view(found, signal)).url;
-      } else
+      if (found !== null) await this.adoptPr(unit, found, unit.head, signal);
+      else
         await this.effect(run, "pr", unit.branch, unit.head, async () => {
           const bodyPath = join(this.journal.directory, `pr-${run.id}-${index}.md`);
           await writeFile(
@@ -554,9 +563,9 @@ export class Delivery {
             ],
             signal,
           );
-          unit.pr = await this.github.find(unit.branch, signal);
-          if (unit.pr === null) throw new Error("PR creation was not confirmed");
-          unit.url = (await this.github.view(unit.pr, signal)).url;
+          const created = await this.github.find(unit.branch, signal);
+          if (created === null) throw new Error("PR creation was not confirmed");
+          await this.adoptPr(unit, created, unit.head, signal);
         });
     }
     return { kind: "passed", run };

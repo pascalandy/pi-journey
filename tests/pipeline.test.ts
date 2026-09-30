@@ -20,6 +20,7 @@ const scenarios: readonly {
   missingBranch?: boolean;
   missingNextBranch?: boolean;
   recoveryChange?: "head" | "remote";
+  closeLostPr?: boolean;
 }[] = [
   { deliveryMode: "single" },
   { deliveryMode: "stack" },
@@ -30,6 +31,7 @@ const scenarios: readonly {
   { deliveryMode: "single", recoveryChange: "remote" },
   { deliveryMode: "stack", missingNextBranch: true },
   { deliveryMode: "single", reviewDefect: true, persistentDefect: true },
+  { deliveryMode: "single", loseCreateResponse: true, closeLostPr: true },
 ];
 for (const {
   deliveryMode,
@@ -39,8 +41,9 @@ for (const {
   missingBranch = false,
   missingNextBranch = false,
   recoveryChange,
+  closeLostPr = false,
 } of scenarios) {
-  test(`full ${deliveryMode}, lost create=${loseCreateResponse}, repair=${reviewDefect}, exhausted=${persistentDefect}, missing branch=${missingBranch || missingNextBranch}, changed=${recoveryChange}`, async () => {
+  test(`full ${deliveryMode}, lost create=${loseCreateResponse}, repair=${reviewDefect}, exhausted=${persistentDefect}, missing branch=${missingBranch || missingNextBranch}, changed=${recoveryChange}, closed PR=${closeLostPr}`, async () => {
     const fixture = await repository();
     const originalPath = process.env.PATH;
     class InterruptedBranch extends OwnedResources {
@@ -104,7 +107,7 @@ const args=process.argv.slice(2);const file=${JSON.stringify(statePath)};const b
 const state=JSON.parse(fs.readFileSync(file,'utf8'));state.commands.push(args);
 const option=(name)=>args[args.indexOf(name)+1];
 const oid=(branch)=>execFileSync('git',['--git-dir',bare,'rev-parse','refs/heads/'+branch],{encoding:'utf8'}).trim();
-const view=(pr)=>({...pr,headRefOid:oid(pr.headRefName)});
+const view=(pr)=>({...pr,state:pr.state||'OPEN',headRefOid:oid(pr.headRefName)});
 let result={};
 if(args[0]==='repo')result={nameWithOwner:args[2].replace('https://github.com/','').replace(/\\.git$/,'')};
 else if(args[0]==='pr'&&args[1]==='list')result=state.prs.filter(pr=>pr.headRefName===option('--head')).map(pr=>({number:pr.number}));
@@ -303,6 +306,20 @@ fs.writeFileSync(file,JSON.stringify(state));process.stdout.write(typeof result=
         assert.ok(recovered);
         assert.equal(recovered.operations.at(-1)?.state, "uncertain");
         if (missingNextBranch) assert.equal(recovered.resumeStage, "work");
+        if (closeLostPr) {
+          const remote = JSON.parse(await readFile(statePath, "utf8"));
+          remote.prs[0].state = "CLOSED";
+          await writeFile(statePath, JSON.stringify(remote));
+          resources.reset();
+          actor.send({ type: "run.resumed", run: recovered, acceptRecoveredEdits: false });
+          final = await waitFor(actor, (snapshot) => snapshot.matches("blocked"), {
+            timeout: 90_000,
+          });
+          assert.match(final.context.reason, /PR #1 is closed .* expected an open PR on main/);
+          const after = JSON.parse(await readFile(statePath, "utf8"));
+          assert.equal(after.prs.length, 1, "recovery never opens a replacement PR");
+          return;
+        }
         resources.reset();
         actor.send({ type: "run.resumed", run: recovered, acceptRecoveredEdits: false });
         final = await waitFor(

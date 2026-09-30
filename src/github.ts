@@ -7,6 +7,7 @@ export const PullRequestSchema = Type.Object({
   url: Type.String(),
   headRefOid: Type.String(),
   baseRefName: Type.String(),
+  state: Type.String(),
 });
 
 export type PullRequest = Static<typeof PullRequestSchema>;
