@@ -183,7 +183,7 @@ If you have no questions, write:
 </section>
 
 <section id="sources"><h2>Sources and remaining proof</h2>
-<p>The first implementation review found seven concrete defects in revalidation, process lifetime, and recovery. The fixes add failure cases for each, bind the approved remote, reject unrecorded commits and retargeted destinations, and give stack descendant preparation its own durable state. Forty behavioral tests now pass with strict typing, lint, build, prompt checks, and isolated Pi loading.</p>
+<p>Two implementation reviews found ten concrete defects in revalidation, branch authority, process lifetime, and recovery. The fixes bind the approved remote and local branch, reject unrecorded commits and retargeted destinations, preserve the causal unit independently of descendant effects, and finish post-commit propagation on resume. Forty-three behavioral tests cover these boundaries with strict typing, lint, build, prompt checks, and isolated Pi loading.</p>
 <p>Implementation post-mortem: happy-path fixtures missed recovery boundaries and review progression. The verification harness now kills the coordinator, loses accepted remote responses, and changes state between observation and action. Host-level review permissions are verified from the actual Codex header. Native subagent metadata and a full session transcript were unavailable, so their advice is not presented as enforced sandbox proof.</p>
 <ul>
 <li><a href="https://github.com/statelyai/skills/blob/e7874e5/skills/xstate-v5/SKILL.md">Stately XState v5 skill</a></li>
