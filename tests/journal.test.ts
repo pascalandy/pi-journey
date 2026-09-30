@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { unlink } from "node:fs/promises";
+import { join } from "node:path";
 import { test } from "node:test";
 import { parseRun } from "../src/contracts.ts";
 import { Journal } from "../src/journal.ts";
@@ -52,6 +54,21 @@ test("a phase checkpoint preserves a prepared external intent from the durable j
       /stale/,
     );
     assert.throws(() => parseRun({ ...record, unitIndex: 3 }), /inconsistent/);
+  } finally {
+    await journal.release();
+    await fixture.cleanup();
+  }
+});
+
+test("a missing active record cannot be mistaken for permission to start a new run", async () => {
+  const fixture = await repository();
+  const journal = new Journal(fixture.root);
+  try {
+    const record = run(fixture.root);
+    await journal.acquire(record.id);
+    journal.write(record);
+    await unlink(join(journal.directory, "runs", `${record.id}.json`));
+    assert.throws(() => journal.current(), /Active workflow record is missing/);
   } finally {
     await journal.release();
     await fixture.cleanup();

@@ -27,15 +27,16 @@ function inside(root: string, target: string): boolean {
 }
 
 function metadata(path: string): boolean {
-  return path.split(sep).includes(".git") || path === ".pi/mode-workflow.json";
+  const normalized = path.toLowerCase();
+  return normalized.split(sep).includes(".git") || normalized === ".pi/mode-workflow.json";
 }
 
 export function scopeAllows(paths: readonly string[], path: string): boolean {
   const normalized = path.replaceAll("\\", "/");
   if (
     isAbsolute(path) ||
-    normalized.split("/").some((part) => part === ".." || part === ".git") ||
-    normalized === ".pi/mode-workflow.json"
+    normalized.split("/").some((part) => part === ".." || part.toLowerCase() === ".git") ||
+    normalized.toLowerCase() === ".pi/mode-workflow.json"
   ) {
     return false;
   }
@@ -96,6 +97,13 @@ export async function writablePath(
       return target;
     } catch (error) {
       if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+      try {
+        if ((await lstat(ancestor)).isSymbolicLink())
+          throw new Error("Write follows a dangling symlink outside canonical scope");
+      } catch (statError) {
+        if (!(statError instanceof Error && "code" in statError && statError.code === "ENOENT"))
+          throw statError;
+      }
       const parent = dirname(ancestor);
       if (parent === ancestor) throw error;
       tail = relative(parent, target);

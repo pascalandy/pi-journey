@@ -193,7 +193,12 @@ export class Journal {
       JSON.parse(readFileSync(path, "utf8")),
       "active run pointer",
     );
-    return this.read(pointer.id);
+    const run = this.read(pointer.id);
+    if (run === null)
+      throw new Error(
+        "Active workflow record is missing; reconcile it before starting another run",
+      );
+    return run;
   }
 
   async release(): Promise<void> {

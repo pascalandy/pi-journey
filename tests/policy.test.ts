@@ -38,6 +38,7 @@ test("scoped writes reject repository escape, metadata, symlink escape, and hard
     await mkdir(join(fixture.root, "other"));
     await writeFile(join(fixture.root, "other", "secret"), "preserve");
     await symlink(join(fixture.root, "other"), join(fixture.root, "src", "link"));
+    await symlink(join(fixture.root, "other", "missing"), join(fixture.root, "src", "dangling"));
     await writeFile(join(fixture.root, "src", "one"), "original");
     await link(join(fixture.root, "src", "one"), join(fixture.root, "src", "two"));
     assert.equal(
@@ -46,7 +47,13 @@ test("scoped writes reject repository escape, metadata, symlink escape, and hard
     );
     await assert.rejects(() => writablePath(fixture.root, ["."], "../outside"), /scope/);
     await assert.rejects(() => writablePath(fixture.root, ["."], ".git/config"), /scope/);
+    await assert.rejects(() => writablePath(fixture.root, ["."], ".GIT/config"), /scope/);
+    await assert.rejects(
+      () => writablePath(fixture.root, ["."], ".PI/MODE-WORKFLOW.JSON"),
+      /scope/,
+    );
     await assert.rejects(() => writablePath(fixture.root, ["src"], "src/link/secret"), /scope/);
+    await assert.rejects(() => writablePath(fixture.root, ["src"], "src/dangling"), /symlink/);
     await assert.rejects(() => writablePath(fixture.root, ["src"], "src/two"), /hard-linked/);
     assert.equal(await readFile(join(fixture.root, "other", "secret"), "utf8"), "preserve");
     assert.throws(() => validateScope(["src/../other"]), /relative/);

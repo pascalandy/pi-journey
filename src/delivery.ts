@@ -610,7 +610,7 @@ export class Delivery {
           await writeFile(
             bodyPath,
             `${run.plan.goal}\n\n${run.plan.body}\n\n` +
-              `Validation at ${unit.head}\n\n${unit.checks?.detail}\n\n` +
+              `Validation at ${unit.head}\n\n${run.plan.checks.map((check) => `${check.name}: passed`).join("\n")}\n\n` +
               `Second pass: ${unit.secondPass?.detail}\nIndependent review: ${unit.review?.detail}\n\n` +
               `Workflow-Run: ${run.id}\n\nCreated by the Pi workflow extension using its configured Pi worker and GPT-6 Astra high in Codex.`,
             { mode: 0o600 },

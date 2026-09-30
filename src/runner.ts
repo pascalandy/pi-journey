@@ -368,7 +368,7 @@ export class Workers {
       }, run.config.workerTimeoutMs);
       ownedSignal.addEventListener("abort", abort, { once: true });
       try {
-        if (ownedSignal.aborted) abort();
+        ownedSignal.throwIfAborted();
         await session.prompt(prompt, { expandPromptTemplates: false });
         ownedSignal.throwIfAborted();
         if (timedOut) throw new Error("Worker timed out");
@@ -432,13 +432,14 @@ export class Workers {
     await writeFile(join(directory, "stderr.txt"), command.stderr, { mode: 0o600 });
     if (command.code !== 0)
       throw new Error(`Independent reviewer failed: ${command.stderr.slice(-4000)}`);
+    const header = command.stderr.match(/^--------\r?\n([\s\S]*?)^--------\s*$/m)?.[1] ?? "";
     if (
       ![
         /^model:\s*gpt-6-astra\s*$/m,
         /^sandbox:\s*read-only\s*$/m,
         /^approval:\s*never\s*$/m,
         /^reasoning effort:\s*high\s*$/m,
-      ].every((expected) => expected.test(command.stderr))
+      ].every((expected) => expected.test(header))
     ) {
       throw new Error(
         "Reviewer runtime metadata does not establish Astra high with read-only permissions",

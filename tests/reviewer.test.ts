@@ -29,7 +29,7 @@ for (const outcome of ["pass", "model", "empty", "malformed", "stale"] as const)
         `#!${process.execPath}
 import assert from 'node:assert/strict';import fs from 'node:fs';
 const argv=process.argv.slice(2);assert.equal(argv[argv.indexOf('--sandbox')+1],'read-only');assert.equal(argv[argv.indexOf('-m')+1],'gpt-6-astra');
-process.stderr.write(${JSON.stringify(`model: ${outcome === "model" ? "another-model" : "gpt-6-astra"}\nsandbox: read-only\napproval: never\nreasoning effort: high\n`)});
+      process.stderr.write(${JSON.stringify(`OpenAI Codex TEST\n--------\nmodel: ${outcome === "model" ? "another-model" : "gpt-6-astra"}\nsandbox: read-only\napproval: never\nreasoning effort: high\n--------\n`)});
 fs.writeFileSync(argv[argv.indexOf('-o')+1],${JSON.stringify(outcome === "empty" ? "" : outcome === "malformed" ? "{}" : JSON.stringify(result))});
 `,
       );
