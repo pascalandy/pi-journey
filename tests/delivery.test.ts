@@ -128,7 +128,7 @@ test("checks certify a real committed tree and reject mutations created by the c
       fixture.root,
       journal,
       resources,
-      { write: unavailable, audit: unavailable, review: unavailable },
+      { write: unavailable, audit: unavailable, review: unavailable, preflight: unavailable },
       () => {},
     );
     assert.equal(
@@ -187,7 +187,7 @@ test("coordinator commits attributable scoped edits and preserves unrelated file
       fixture.root,
       journal,
       resources,
-      { write: unavailable, audit: unavailable, review: unavailable },
+      { write: unavailable, audit: unavailable, review: unavailable, preflight: unavailable },
       () => {},
     );
     const committed = await delivery.execute("commit", record, new AbortController().signal);

@@ -19,7 +19,7 @@ import {
 import type { Static, TSchema } from "typebox";
 import { parse, ReviewSchema, type Run, WorkerResultSchema } from "./contracts.ts";
 import type { Journal } from "./journal.ts";
-import { MutationQueue, writablePath } from "./policy.ts";
+import { approvedPaths, MutationQueue, writablePath } from "./policy.ts";
 
 export interface CommandResult {
   code: number;
@@ -163,6 +163,35 @@ export class Workers {
     return this.run(run, prompt, WorkerResultSchema, true, signal);
   }
 
+  async preflight(run: Run, signal: AbortSignal): Promise<void> {
+    this.model();
+    await readFile(run.config.secondPassSkill, "utf8");
+    await readFile(run.config.retrospectiveSkill, "utf8");
+    const help = await this.resources.command(
+      [run.config.reviewerBinary, "exec", "--help"],
+      this.repository,
+      signal,
+    );
+    if (
+      help.code !== 0 ||
+      ![
+        "--sandbox",
+        "read-only",
+        "--output-schema",
+        "--ignore-user-config",
+        "--ignore-rules",
+      ].every((flag) => help.stdout.includes(flag))
+    ) {
+      throw new Error("Reviewer CLI does not support the required read-only protocol");
+    }
+    const login = await this.resources.command(
+      [run.config.reviewerBinary, "login", "status"],
+      this.repository,
+      signal,
+    );
+    if (login.code !== 0) throw new Error("Reviewer authentication is unavailable");
+  }
+
   audit(run: Run, prompt: string, signal: AbortSignal) {
     return this.run(run, prompt, ReviewSchema, false, signal);
   }
@@ -178,6 +207,7 @@ export class Workers {
       let result: Static<T> | undefined;
       const unit = run.plan.units[run.unitIndex];
       if (!unit) throw new Error("Worker unit is absent");
+      const paths = approvedPaths(run);
       const finish = defineTool({
         name: "finish_task",
         label: "Finish task",
@@ -194,7 +224,7 @@ export class Workers {
         ownedSignal.throwIfAborted();
         if (result !== undefined) throw new Error("Task is already complete");
         this.journal.assertOwned(run.id);
-        const safe = await writablePath(this.repository, unit.paths, path);
+        const safe = await writablePath(this.repository, paths, path);
         const record = this.journal.read(run.id) ?? run;
         const edit: Run["edits"][number] = {
           unit: run.unitIndex,
@@ -207,7 +237,7 @@ export class Workers {
         this.journal.write(record);
         ownedSignal.throwIfAborted();
         await mkdir(dirname(safe), { recursive: true });
-        await writablePath(this.repository, unit.paths, safe);
+        await writablePath(this.repository, paths, safe);
         await writeFile(safe, content);
         edit.state = "confirmed";
         this.journal.write(record);
@@ -217,8 +247,8 @@ export class Workers {
       });
       const edit = createEditToolDefinition(this.repository, {
         operations: {
-          access: async (path) => access(await writablePath(this.repository, unit.paths, path)),
-          readFile: async (path) => readFile(await writablePath(this.repository, unit.paths, path)),
+          access: async (path) => access(await writablePath(this.repository, paths, path)),
+          readFile: async (path) => readFile(await writablePath(this.repository, paths, path)),
           writeFile: saveFile,
         },
       });

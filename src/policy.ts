@@ -1,5 +1,12 @@
 import { lstat, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import type { Run } from "./contracts.ts";
+
+export function approvedPaths(run: Run): string[] {
+  return run.plan.delivery === "single" && run.units.every((unit) => unit.head !== null)
+    ? run.plan.units.flatMap((unit) => unit.paths)
+    : (run.plan.units[run.unitIndex]?.paths ?? []);
+}
 
 export const PLANNING_FOOTER = "— We are in the Planning Phase";
 export const PLANNING_TOOLS = ["read", "grep", "find", "ls", "workflow_plan"];

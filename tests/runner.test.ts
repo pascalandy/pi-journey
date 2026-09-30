@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -27,11 +28,12 @@ test("drain cancels the complete child process group before returning", async ()
   const directory = await mkdtemp(join(tmpdir(), "workflow-process-"));
   const marker = join(directory, "pid");
   const resources = new OwnedResources();
-  const childProgram = "process.on('SIGTERM',()=>{}); setInterval(()=>{},1000)";
+  const childProgram =
+    "process.on('SIGTERM',()=>{});require('node:fs').writeFileSync(process.argv[1],String(process.pid));setInterval(()=>{},1000)";
   const program =
-    `const {spawn}=require('node:child_process');const fs=require('node:fs');` +
-    `const c=spawn(process.execPath,['-e',${JSON.stringify(childProgram)}],{stdio:'inherit'});` +
-    `fs.writeFileSync(process.argv[1],String(c.pid));setInterval(()=>{},1000)`;
+    `const {spawn}=require('node:child_process');` +
+    `spawn(process.execPath,['-e',${JSON.stringify(childProgram)},process.argv[1]],{stdio:'inherit'});` +
+    "setInterval(()=>{},1000)";
   const job = resources.command(
     [process.execPath, "-e", program, marker],
     directory,
@@ -49,11 +51,13 @@ test("drain cancels the complete child process group before returning", async ()
     assert.ok(pid > 0, "grandchild started");
     await resources.drain();
     await outcome;
-    // A reaped child is gone; on Linux a killed orphan may briefly remain a zombie.
+    // A killed orphan can remain a zombie until the host's init process reaps it.
     let alive = false;
     try {
-      const status = await readFile(`/proc/${pid}/stat`, "utf8");
-      alive = !status.includes(") Z ");
+      const status = execFileSync("ps", ["-o", "stat=", "-p", String(pid)], {
+        encoding: "utf8",
+      }).trim();
+      alive = status !== "" && !status.startsWith("Z");
     } catch {}
     assert.equal(alive, false, "grandchild no longer executes");
   } finally {

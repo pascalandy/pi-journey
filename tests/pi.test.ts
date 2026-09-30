@@ -69,6 +69,39 @@ test("real Pi SDK registers the extension and enforces Planning across tool and 
     });
     assert.equal(shell?.result?.exitCode, 1);
     assert.equal(runner.getToolDefinition("workflow_plan")?.name, "workflow_plan");
+    const plan = runner.getToolDefinition("workflow_plan");
+    assert.ok(plan);
+    const proposal = {
+      goal: "Add an export",
+      body: "CMO: absent. FMO: export it. Premortem: scope drift.",
+      units: [{ title: "feat: export value", paths: ["src"], commitMessage: "feat: export value" }],
+      checks: [
+        { name: "check", argv: ["node", "--version"], effects: "Reads version", timeoutMs: 1_000 },
+      ],
+      delivery: "single",
+    };
+    const result = await plan.execute(
+      "plan",
+      proposal,
+      undefined,
+      undefined,
+      runner.createToolContext("plan", undefined),
+    );
+    assert.match(JSON.stringify(result), /Plan recorded/);
+    const command = runner.getCommand("workflow");
+    assert.ok(command);
+    await command.handler(
+      `implement ${"0".repeat(64)} --allow-checks`,
+      runner.createCommandContext(),
+    );
+    const { Journal } = await import("../src/journal.ts");
+    assert.equal(new Journal(fixture.root).current(), null, "stale approval cannot create a run");
+    await command.handler("implement --allow-checks", runner.createCommandContext());
+    assert.equal(
+      new Journal(fixture.root).current(),
+      null,
+      "grant without a digest cannot create a run",
+    );
     const footer = await runner.emitMessageEnd({
       type: "message_end",
       message: {
