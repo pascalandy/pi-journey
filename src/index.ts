@@ -162,6 +162,14 @@ export default function journey(pi: ExtensionAPI): void {
     }
   }
 
+  // A new run needs an idle Pi agent, no running stage, and no unfinished run
+  function assertReadyForRun(ctx: ExtensionContext): void {
+    if (!ctx.isIdle()) throw new Error("Wait for the current response to finish");
+    if (!idle() && !actor?.getSnapshot().matches("delivered"))
+      throw new Error("Stop or resume the existing run first");
+    if (journal?.unfinished()) throw new Error("An unfinished run exists; use /journey resume");
+  }
+
   async function implement(
     ctx: ExtensionContext,
     digest: string | undefined,
@@ -173,9 +181,7 @@ export default function journey(pi: ExtensionAPI): void {
     const store = journal;
     const owned = resources;
     const epoch = approvalEpoch;
-    if (!ctx.isIdle()) throw new Error("Wait for the current response to finish");
-    if (!idle() && !actor.getSnapshot().matches("delivered"))
-      throw new Error("Stop or resume the existing run first");
+    assertReadyForRun(ctx);
     const proposal = pending;
     if (!proposal || proposal.repository !== repository)
       throw new Error("Record a plan with journey_plan first");
@@ -223,10 +229,7 @@ export default function journey(pi: ExtensionAPI): void {
   }
 
   function requestDraft(ctx: ExtensionContext, source: string): void {
-    if (!ctx.isIdle()) throw new Error("Wait for the current response to finish");
-    if (!idle() && !actor?.getSnapshot().matches("delivered"))
-      throw new Error("Stop or resume the existing run first");
-    if (journal?.unfinished()) throw new Error("An unfinished run exists; use /journey resume");
+    assertReadyForRun(ctx);
     setDrafting({ shown: pending?.id });
     pi.sendUserMessage(draftRequest(source));
   }
