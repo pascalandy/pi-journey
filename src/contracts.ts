@@ -55,8 +55,11 @@ export const ConfigSchema = Type.Object(
   {
     baseBranch: text,
     secondPassSkill: text,
+    impactsSkill: text,
     retrospectiveSkill: text,
     reviewerBinary: text,
+    reviewerModel: Type.String({ pattern: "^[A-Za-z0-9._-]+$" }),
+    reviewerEffort: Type.String({ pattern: "^[a-z]+$" }),
     workerTimeoutMs: Type.Integer({ minimum: 1_000, maximum: 3_600_000 }),
     reviewerTimeoutMs: Type.Integer({ minimum: 1_000, maximum: 3_600_000 }),
     maxRepairRounds: Type.Integer({ minimum: 0, maximum: 10 }),
@@ -102,7 +105,7 @@ export const StageSchema = Type.Union([
   Type.Literal("commit"),
   Type.Literal("checks"),
   Type.Literal("secondPass"),
-  Type.Literal("review"),
+  Type.Literal("impacts"),
   Type.Literal("repair"),
   Type.Literal("publish"),
   Type.Literal("retrospective"),
@@ -126,7 +129,7 @@ export const UnitSchema = Type.Object(
     head: Type.Union([sha, Type.Null()]),
     checks: Type.Union([EvidenceSchema, Type.Null()]),
     secondPass: Type.Union([EvidenceSchema, Type.Null()]),
-    review: Type.Union([EvidenceSchema, Type.Null()]),
+    impacts: Type.Union([EvidenceSchema, Type.Null()]),
     pr: Type.Union([Type.Integer({ minimum: 1 }), Type.Null()]),
     url: Type.Union([text, Type.Null()]),
   },
@@ -204,8 +207,8 @@ export const NEXT_STAGE = {
   work: "commit",
   commit: "checks",
   checks: "secondPass",
-  secondPass: "review",
-  review: "publish",
+  secondPass: "impacts",
+  impacts: "publish",
   repair: "commit",
   publish: "retrospective",
   retrospective: "finalizing",
@@ -229,8 +232,11 @@ export function defaultConfig(): Config {
   return {
     baseBranch: "main",
     secondPassSkill: join(homedir(), ".codex/skills/2nd-pass/SKILL.md"),
+    impactsSkill: join(homedir(), ".codex/skills/blast-radius/SKILL.md"),
     retrospectiveSkill: join(homedir(), ".codex/skills/pa-retro/SKILL.md"),
     reviewerBinary: "codex",
+    reviewerModel: "gpt-6.1-sol",
+    reviewerEffort: "xhigh",
     workerTimeoutMs: 900_000,
     reviewerTimeoutMs: 900_000,
     maxRepairRounds: 3,
@@ -288,7 +294,7 @@ export function makeRun(plan: Plan, config: Config): Run {
       head: null,
       checks: null,
       secondPass: null,
-      review: null,
+      impacts: null,
       pr: null,
       url: null,
     })),
@@ -341,7 +347,7 @@ export function expectedUnitHead(run: Run): string | null {
 export function isCurrentEvidence(unit: Static<typeof UnitSchema>): boolean {
   return (
     unit.head !== null &&
-    [unit.checks, unit.secondPass, unit.review].every(
+    [unit.checks, unit.secondPass, unit.impacts].every(
       (item) => item?.passed && item.head === unit.head,
     )
   );

@@ -142,13 +142,13 @@ test("review verdict cannot erase old unresolved findings or certify another hea
       },
     ],
   };
-  assert.equal(acceptReview(record, review, "review").kind, "repair");
+  assert.equal(acceptReview(record, review, "impacts").kind, "repair");
   assert.equal(
-    acceptReview(record, { ...review, verdict: "pass", findings: [] }, "review").kind,
+    acceptReview(record, { ...review, verdict: "pass", findings: [] }, "impacts").kind,
     "repair",
   );
   assert.equal(
-    acceptReview(record, { ...review, verdict: "pass", reviewedHead: "b".repeat(40) }, "review")
+    acceptReview(record, { ...review, verdict: "pass", reviewedHead: "b".repeat(40) }, "impacts")
       .kind,
     "blocked",
   );
@@ -164,7 +164,7 @@ test("review verdict cannot erase old unresolved findings or certify another hea
           evidence: "src/file.ts:1 now uses the current value",
         })),
       },
-      "review",
+      "impacts",
     ).kind,
     "passed",
   );

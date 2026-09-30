@@ -27,9 +27,10 @@ const proposal = {
   delivery: "single",
 } satisfies PlanInput;
 
-// Records confirmations; the other methods Pi copies from a bound UI do nothing
-function recordingUI() {
+// Records dialogs; the other methods Pi copies from a bound UI do nothing
+function recordingUI(choose: (options: string[]) => string | undefined = () => undefined) {
   const confirms: { title: string; message: string }[] = [];
+  const selects: string[][] = [];
   const quiet = [
     "notify",
     "setStatus",
@@ -50,16 +51,28 @@ function recordingUI() {
       confirms.push({ title, message });
       return false;
     },
+    select: async (_title: string, options: string[]) => {
+      selects.push(options);
+      return choose(options);
+    },
   } as unknown as ExtensionUIContext;
-  return { ui, confirms };
+  return { ui, confirms, selects };
 }
 
 async function startSession(root: string, uiContext?: ExtensionUIContext) {
+  const inputs: string[] = [];
   const settings = SettingsManager.inMemory();
   const loader = new DefaultResourceLoader({
     cwd: root,
     agentDir: join(root, ".isolated"),
-    extensionFactories: [journey],
+    extensionFactories: [
+      journey,
+      (pi) => {
+        pi.on("input", (event) => {
+          if (event.source === "extension") inputs.push(event.text);
+        });
+      },
+    ],
     noExtensions: true,
     noSkills: true,
     noPromptTemplates: true,
@@ -98,7 +111,7 @@ async function startSession(root: string, uiContext?: ExtensionUIContext) {
     await runner.emit({ type: "session_shutdown", reason: "quit" });
     session.dispose();
   };
-  return { session, manager, runner, record, run, close };
+  return { session, manager, runner, inputs, record, run, close };
 }
 
 test("real Pi SDK leaves an idle session unrestricted and binds approval to the visible plan", async () => {
@@ -183,7 +196,7 @@ test("the approval dialog lists every writable path and commit message the plan 
       ],
     });
     assert.match(JSON.stringify(plan.result), /scripts\/tool\.ts/);
-    await run("implement");
+    await run(`implement ${plan.digest}`);
     assert.equal(confirms.length, 1);
     for (const expected of [
       "docs/guide.md",
@@ -227,6 +240,48 @@ test("tree navigation is cancelled while owned work cannot drain", async () => {
   } finally {
     if (owner) await writeFile(ownerPath, owner);
     await run("stop");
+    await close();
+    await fixture.cleanup();
+  }
+});
+
+test("the journey picker offers modes, ping reaches the Pi agent, and implement drafts before approval", async () => {
+  const fixture = await repository();
+  const { ui, confirms, selects } = recordingUI((options) =>
+    options.find((option) => option.startsWith("ping:")),
+  );
+  const { session, runner, inputs, record, run, close } = await startSession(fixture.root, ui);
+  try {
+    await run("");
+    assert.deepEqual(
+      selects[0]?.map((option) => option.slice(0, option.indexOf(":"))),
+      ["implement", "ping", "status"],
+    );
+    assert.deepEqual(inputs, ["ping"]);
+    assert.equal(session.getActiveToolNames().includes("journey_plan"), false);
+    await run("implement issue #42");
+    assert.match(inputs[1] ?? "", /from this source: issue #42\. Call journey_plan once/);
+    assert.equal(session.getActiveToolNames().includes("journey_plan"), true);
+    await record({
+      ...proposal,
+      units: [{ title: "Fix", paths: ["src/fix.ts"], commitMessage: "fix: close issue 42" }],
+    });
+    await runner.emit({ type: "agent_settled" });
+    const deadline = Date.now() + 5_000;
+    while (confirms.length === 0 && Date.now() < deadline)
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.match(
+      confirms[0]?.message ?? "",
+      /Writable: src\/fix\.ts\n {3}Commit: fix: close issue 42/,
+    );
+    assert.equal(
+      session.getActiveToolNames().includes("journey_plan"),
+      true,
+      "a declined plan keeps drafting open for a revision",
+    );
+    await run("stop");
+    assert.equal(session.getActiveToolNames().includes("journey_plan"), false);
+  } finally {
     await close();
     await fixture.cleanup();
   }

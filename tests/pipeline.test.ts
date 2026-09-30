@@ -249,7 +249,7 @@ fs.writeFileSync(file,JSON.stringify(state));process.stdout.write(typeof result=
         assert.equal(writeAttempts, 2);
         const recovered = journal.current();
         assert.ok(recovered);
-        assert.equal(recovered.resumeStage, "review");
+        assert.equal(recovered.resumeStage, "impacts");
         resources.reset();
         actor.send({ type: "run.resumed", run: recovered, acceptRecoveredEdits: false });
         final = await waitFor(actor, (snapshot) => snapshot.matches("blocked"), {

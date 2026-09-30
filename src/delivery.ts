@@ -32,7 +32,7 @@ export function deliveryTargets(run: Run): number[] {
     : run.units.map((_unit, index) => index);
 }
 
-export function acceptReview(run: Run, review: Review, kind: "secondPass" | "review"): StepResult {
+export function acceptReview(run: Run, review: Review, kind: "secondPass" | "impacts"): StepResult {
   const unit = current(run);
   if (review.reviewedHead !== unit.head)
     return { kind: "blocked", run, reason: "Review head is stale" };
@@ -435,7 +435,7 @@ export class Delivery {
     }
     unit.checks = null;
     unit.secondPass = null;
-    unit.review = null;
+    unit.impacts = null;
     return { kind: "passed", run };
   }
 
@@ -471,6 +471,7 @@ export class Delivery {
       `Read-only second pass. Follow this skill without changing files:\n${skill}\n` +
         `Review ${unit.baseHead}..${unit.head}; reviewedHead=${unit.head}.\nPlan:\n${run.plan.body}\n` +
         `Prior findings (IDs after the '${run.unitIndex}:secondPass:' prefix are your IDs):\n${JSON.stringify(run.findings)}\n` +
+        `Then write your own premortem: assume this change merged and broke something a week later, and report each blind spot that explains it as a finding. ` +
         `For fixed/dismissed findings include source evidence. Use finish_task to return the review.`,
       signal,
     );
@@ -478,10 +479,10 @@ export class Delivery {
     return acceptReview(run, result, "secondPass");
   }
 
-  async review(run: Run, signal: AbortSignal): Promise<StepResult> {
+  async impacts(run: Run, signal: AbortSignal): Promise<StepResult> {
     const unit = current(run);
     if (!unit.head || !unit.baseHead)
-      throw new Error("Independent review requires a base and head");
+      throw new Error("The impacts review requires a base and head");
     const result = await this.workers.review(
       run,
       unit.head,
@@ -490,7 +491,7 @@ export class Delivery {
       this.showCommand,
     );
     await this.assertCleanHead(unit.head, signal);
-    const accepted = acceptReview(run, result, "review");
+    const accepted = acceptReview(run, result, "impacts");
     if (accepted.kind !== "passed") return accepted;
     if (run.unitIndex + 1 < run.units.length) {
       run.unitIndex++;
@@ -540,8 +541,8 @@ export class Delivery {
             bodyPath,
             `${run.plan.goal}\n\n${run.plan.body}\n\n` +
               `Validation at ${unit.head}\n\n${run.plan.checks.map((check) => `${check.name}: passed`).join("\n")}\n\n` +
-              `Second pass: ${unit.secondPass?.detail}\nIndependent review: ${unit.review?.detail}\n\n` +
-              `${RUN_TRAILER}: ${run.id}\n\nCreated by Pi Journey using its configured Pi worker and GPT-6 Astra high in Codex.`,
+              `Second pass: ${unit.secondPass?.detail}\nImpacts review: ${unit.impacts?.detail}\n\n` +
+              `${RUN_TRAILER}: ${run.id}\n\nCreated by Pi Journey with its configured Pi worker and ${run.config.reviewerModel} (${run.config.reviewerEffort}) in Codex.`,
             { mode: 0o600 },
           );
           await this.github.command(

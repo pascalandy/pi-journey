@@ -1,76 +1,88 @@
-# Pi mode workflow
+# Pi Journey
 
-A Pi extension for planning without repository edits and delivering an accepted plan through an owned XState workflow.
+A Pi extension for work that takes several stops. Chat with your Pi agent as usual. When the plan is settled, start a journey and one XState coordinator carries it through owned workers, checks, reviews, and publication, stopping with a named reason whenever something needs you.
 
-The canonical design and acceptance criteria are in [plan.html](plan.html). The [published plan](https://om1.donkey-arcturus.ts.net:8444/html-publish/pi-mode-workflow-plan/) is private to the configured tailnet.
-
-Start in Planning, share your idea, and resolve alignment questions. The assistant records a CMO/FMO/premortem plan with ordered units, writable paths, and named checks. Press **Ctrl+Alt+M** to approve the displayed plan and enter Implementation. Press it again to cancel owned work and return to Planning after it drains.
-
-Implementation runs one Pi writer, commits its changes, runs checks against that commit, performs a second pass, and asks GPT-6 Astra high for an independent read-only Codex review. Verified defects enter a bounded repair loop. The coordinator publishes regular PRs, monitors checks and review threads, and records a retrospective. Ordinary approval leaves the PRs unmerged.
+The design and acceptance contract are in [plan.html](plan.html). The `implement` mode recreates [the implementation guide](docs/journeys-guides/implementation-v1-1.md).
 
 ## Try it
 
-Requirements are Linux or macOS, Node 24+, pnpm, Pi 0.99.1, Git, authenticated GitHub CLI, an available Pi model, and a logged-in Codex CLI supporting `gpt-6-astra` with high effort. Run from a clean repository root at the current GitHub `origin` base commit. Git identity must already be configured.
+Requirements are Linux or macOS, Node 24+, pnpm, Pi 0.99.1, Git, an authenticated GitHub CLI, a Pi model from a built-in or `models.json` provider, and a logged-in Codex CLI. Run journeys from a clean repository root at the current GitHub `origin` base commit, with a Git identity configured.
 
 ```sh
 pnpm install --frozen-lockfile
-just check
 cd /path/to/your/repository
-pi --no-extensions -e /home/pascal/Projects/pi-mode-workflow/src/index.ts
+pi -e /path/to/pi-journey/src/index.ts
 ```
 
-This explicit extension invocation changes no installed Pi settings. The conversation admits only `read`, `grep`, `find`, `ls`, and Planning's `workflow_plan`. Shell commands and other extension tools are blocked. Use a disposable project for your first model-backed run.
+This explicit extension invocation changes no installed Pi settings and loads alongside your other extensions. Use a disposable project for your first model-backed run.
+
+## Pick a mode
+
+Type `/journey` to open the picker, or name the mode directly. Tab completes the names.
 
 | Command | Behavior |
 | --- | --- |
-| `/workflow status` | Show mode, phase, proposal digest, and blocker |
-| `/workflow plan` | Cancel, drain, release ownership, then enter Planning |
-| `/workflow implement` | Display a confirmation of the current plan and command effects |
-| `/workflow implement <digest> --allow-checks` | Approve that exact plan, trusted checks, and PR publication |
-| `/workflow implement <digest> --allow-checks --merge` | Also authorize this run's protected merge gate |
-| `/workflow resume` | Reconcile an unfinished run and resume its durable phase |
-| `/workflow resume --accept-edits` | Also accept recovery edits that match recorded paths and content hashes |
-| `/workflow retire` | Drain and retire a blocked run, preserving files, branches, PRs and history so you can replan |
+| `/journey` | Pick a mode, or a control that applies to the current run |
+| `/journey implement` | Ask the Pi agent to draft a plan from the conversation, then open the approval dialog |
+| `/journey implement <note or issue>` | Draft the plan from that source instead, such as `#42` |
+| `/journey implement <digest>` | Open the approval dialog for a plan already recorded in this branch |
+| `/journey implement <digest> --allow-checks` | Approve that plan without a dialog, for RPC and scripts |
+| `/journey ping` | Placeholder mode: the Pi agent answers ping |
+| `/journey status` | Show the phase, the plan digest, and any blocker |
+| `/journey stop` | Stop drafting, or cancel owned work, drain it, and release the repository |
+| `/journey resume` | Reconcile an unfinished run and continue from its durable stage |
+| `/journey resume --accept-edits` | Also accept recovered edits that match recorded paths and content hashes |
+| `/journey retire` | Drain and retire an unfinished run, keeping its files, branches, PRs, and history |
 
-Merge permission belongs to one run. It is never inferred from an assistant message. The Planning footer is exactly `— We are in the Planning Phase`.
+`/journey implement` turns on the `journey_plan` tool and asks the Pi agent to record goal, body, ordered units with writable paths and commit messages, the project's own check command, and single or stack delivery. The dialog opens once the Pi agent finishes. It lists every unit's writable paths and commit message, the checks with their declared effects, and the delivery. Declining starts nothing and keeps drafting open, so you can ask for a revision. `/journey stop` turns drafting off.
+
+The session is yours whenever no stage runs. While a stage runs, the Pi agent keeps only `read`, `grep`, `find`, and `ls`, and `!` shell commands are refused until you run `/journey stop`.
+
+## The implement journey
+
+`preflight` → for each unit: `work` → `commit` → `checks` → `secondPass` → `impacts` → `publish` → `retrospective` → delivered
+
+- `work`: one Pi worker edits only the unit's approved paths; the coordinator commits the result
+- `checks`: the coordinator runs the plan's checks against the committed tree and rejects checks that change it
+- `secondPass`: a read-only Pi worker follows the 2nd-pass skill and writes its own premortem
+- `impacts`: a read-only Codex run applies the blast-radius skill and a premortem to the unit's diff
+- `publish`: push each branch and open one regular PR, or one PR per unit for a stack
+- `retrospective`: a read-only Pi worker follows the pa-retro skill; its result stays in the journal
+
+Open P0 to P2 findings send the unit through repair, up to `maxRepairRounds`. A journey ends with the PRs open and unmerged. Merging belongs to the project, for example with its own `just merge`. The guide's polish review, confidence report, merge gate, and issue filing are not part of the journey yet.
 
 ## Configuration
 
-Configure at least one remote requirement in `requiredChecks` or `requiredReviewers` in the target repository's `.pi/mode-workflow.json`. Empty requirements block preflight; absent asynchronous CI or review evidence cannot certify completion. Check names must match GitHub's exact names. Other overrides are optional. Unknown keys are rejected. The extension snapshots configuration when approval creates a run.
+Put overrides in the target repository's `.pi/journey.json`. Unknown keys are rejected, and approval snapshots the configuration into the run.
 
 ```json
 {
   "baseBranch": "main",
   "secondPassSkill": "/absolute/path/to/2nd-pass/SKILL.md",
+  "impactsSkill": "/absolute/path/to/blast-radius/SKILL.md",
   "retrospectiveSkill": "/absolute/path/to/pa-retro/SKILL.md",
   "reviewerBinary": "codex",
-  "maxRepairRounds": 3,
-  "requiredChecks": ["verify"],
-  "requiredReviewers": ["your-reviewer"]
+  "reviewerModel": "gpt-6.1-sol",
+  "reviewerEffort": "xhigh",
+  "maxRepairRounds": 3
 }
 ```
 
-Defaults resolve the two skills under `~/.codex/skills/`. Missing skills, reviewer capability failures, unavailable permissions, conflicting Git state, and exhausted repair budgets block the run with a reason. Resume rechecks the failed gate and cannot renew an exhausted repair budget. Worker and review timeouts default to 15 minutes. Monitoring defaults to 15 minutes with a 10-second interval. See [ConfigSchema](src/contracts.ts) for accepted keys and bounds.
+The skills default to `~/.codex/skills/`. Missing skills, a worker model the worker session cannot load, reviewer capability failures, conflicting Git state, and an exhausted repair budget block the run with a reason. Resume rechecks the failed gate and cannot renew an exhausted repair budget. Worker and review timeouts default to 15 minutes. See [ConfigSchema](src/contracts.ts) for the accepted keys and bounds.
 
 ## Boundaries and recovery
 
-File tools normalize POSIX scopes before approval, reject repository metadata and escaping symlinks, and serialize the complete edit operation. Before overwriting a file, they require its content to match the committed baseline or a confirmed owned edit; external content is preserved. They cannot sandbox arbitrary repository scripts. Approving checks trusts their declared effects, Git hooks, checkout filters, and the repository code they execute. Read-only tool admission also cannot sandbox other extensions' JavaScript. Controlled workers discover no ambient extensions, skills, prompt templates, themes, or context files.
+File tools normalize POSIX scopes before approval, reject repository metadata and escaping symlinks, and serialize the complete edit operation. Before overwriting a file, they require its content to match the committed baseline or an owned edit, including one whose bytes landed just before a crash. External content is preserved. They cannot sandbox arbitrary repository scripts: approving checks trusts their declared effects, Git hooks, checkout filters, and the code they execute. Controlled workers discover no ambient extensions, skills, prompt templates, themes, or context files, so preflight rejects a model whose provider only an extension registered.
 
-The journal is under the checkout's Git directory at `pi-mode-workflow/`. It contains the active pointer, validated run records, edit hashes, operation intents, private check logs, reviewer artifacts, and retrospectives. A process lease prevents two coordinators from owning the same checkout. Each command has an IPC supervisor that kills its process group when the coordinator dies. Reloading or reopening an unfinished run never automatically starts effects.
+The journal lives in the checkout's Git directory at `pi-journey/`, so Git never tracks it. It holds the active pointer, validated run records, edit hashes, operation intents, private check logs, reviewer artifacts, and retrospectives. A process lease prevents two coordinators from owning the same checkout, and each command has an IPC supervisor that kills its process group when the coordinator dies. Reloading never starts effects on its own.
 
-Recovery inspects Git and GitHub before retrying uncertain operations. It rejects a changed remote repository, unrecorded commits, missing active records, and unattributed dirty files. The extension does not reset, delete data, force-push, or silently rebase. Resolve ambiguous changes yourself before resuming. If the remote base advances and the run cannot resume, `/workflow retire` preserves the old work and history while permitting a fresh plan at the current base. Tree navigation reloads the proposal from the visible conversation branch and revokes open approval dialogs.
+Recovery inspects Git and GitHub before retrying uncertain operations. It rejects a changed remote repository, unrecorded commits, missing active records, and unattributed dirty files. The extension does not reset, delete data, force-push, or silently rebase. If the remote base advances and the run cannot resume, `/journey retire` keeps the old work and permits a fresh plan at the current base. Tree navigation, forks, and session switches first drain owned work and are cancelled when it cannot drain. Navigation reloads the proposal from the visible conversation branch and revokes open approval dialogs.
 
-Ordered units can select `single` delivery for one cumulative PR or `stack` for dependent branches and PRs. Stacks publish bottom-up. Repairs merge ancestor updates into descendants and recheck them, including recovery after a confirmed repair commit. The journal keeps the causal unit separate from the target of a descendant operation. Authorized landing prepares the next layer only after its predecessor is merged, fetches its base from the recorded remote URL, and invalidates its prior evidence. Conflicts stop with files preserved.
-
-Auto-merge uses `--match-head-commit` and requires classic GitHub branch protection with strict required checks, approving reviews, stale-review dismissal, and enforcement for admins. Missing protection, unsupported ruleset-only policies, missing access, changed destinations, stale base/head evidence, pending checks, or unresolved threads block merging. Queued remote merges require explicit reconciliation and are never blindly replayed. No admin override is used. Review histories exceeding 100 threads or 100 reviews block for explicit reconciliation.
-
-Known release blocker: the merge request pins the head SHA but cannot atomically pin the destination branch using the documented GitHub merge inputs. A retarget between observation and mutation can escape the intended destination. Automatic merging is not release-ready until this authority gap is resolved or the first release explicitly blocks it. See the [GitHub merge API](https://docs.github.com/en/rest/pulls/pulls#merge-a-pull-request).
+`single` delivery publishes one cumulative PR. `stack` delivery gives each unit a branch based on the previous unit and publishes the PRs bottom-up.
 
 ## Verification
 
-`just check` runs strict TypeScript, behavioral tests, Biome, the canonical prompt drift check, the build, and an isolated Pi RPC load. Tests use real temporary Git repositories and process groups. Offline pipeline tests simulate GitHub and workers while exercising actual commits, pushes to a local bare remote, ordered PR publication, and recovery from a lost PR-creation response. SDK tests load the real extension and verify tool guards, shell interception, plan recording, stale approvals, and the finalized footer.
-
-It also runs the standard-library tests of `scripts/signoff.py` and `scripts/merge.py` against a bare origin and a fake `gh`. Model-backed writer quality, remote merge policy enforcement, and interactive terminal rendering require a live acceptance run; offline fixtures do not establish those results.
+`just check` runs strict TypeScript, the behavioral tests, Biome, the build, an isolated Pi RPC load that must list `/journey`, and the standard-library tests of `scripts/signoff.py` and `scripts/merge.py`. Tests use real temporary Git repositories and process groups. Offline pipeline tests simulate GitHub and workers while exercising actual commits, pushes to a local bare remote, ordered PR publication, and recovery from lost responses. SDK tests load the real extension, drive its commands and dialogs, and make no model call. Model-backed writer quality and interactive terminal rendering need a live run; offline fixtures do not establish them.
 
 ## Develop
 

@@ -25,7 +25,7 @@ test("a run does not start until an operator event approves it", async () => {
     "commit",
     "checks",
     "secondPass",
-    "review",
+    "impacts",
     "publish",
     "retrospective",
   ]);

@@ -1,6 +1,10 @@
 import { readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionCommandContext,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { waitFor } from "xstate";
 import {
@@ -20,6 +24,20 @@ import { createJourney } from "./journey.ts";
 import { runAdmission, validateScope } from "./policy.ts";
 import { OwnedResources, Workers } from "./runner.ts";
 
+const PLAN_TOOL = "journey_plan";
+const DIGEST = /^[a-f0-9]{64}$/;
+
+function draftRequest(source: string): string {
+  return (
+    `Draft a Pi Journey implementation plan from ${source ? `this source: ${source}` : "our conversation so far"}. ` +
+    `Call ${PLAN_TOOL} once with the goal, the agreed plan as the body, ordered verifiable units ` +
+    "(each with a title, the exact repository-relative paths it may write, and a Conventional Commits message), " +
+    'the project\'s own verification command as the check (for example ["just", "check"]) with its effects and timeout, ' +
+    'and "single" delivery for one PR or "stack" for dependent PRs. Do not edit files. ' +
+    "If something essential is unclear, ask me instead of calling the tool."
+  );
+}
+
 export default function journey(pi: ExtensionAPI): void {
   let actor: ReturnType<typeof createJourney> | undefined;
   let journal: Journal | undefined;
@@ -29,6 +47,8 @@ export default function journey(pi: ExtensionAPI): void {
   let context: ExtensionContext | undefined;
   let control = Promise.resolve();
   let approvalEpoch = 0;
+  // Set while /journey implement waits for the Pi agent to record a plan
+  let drafting: { shown: string | undefined } | undefined;
 
   const report = (text: string) =>
     pi.sendMessage(
@@ -46,6 +66,12 @@ export default function journey(pi: ExtensionAPI): void {
     !(["idle", "blocked", "delivered"] as const).some((state) =>
       actor?.getSnapshot().matches(state),
     );
+  const setDrafting = (next: typeof drafting) => {
+    drafting = next;
+    const others = pi.getActiveTools().filter((name) => name !== PLAN_TOOL);
+    pi.setActiveTools(drafting ? [...others, PLAN_TOOL] : others);
+    if (idle()) context?.ui.setStatus("journey", drafting ? "Journey | drafting plan" : undefined);
+  };
   const lockControl = (operation: () => Promise<void>) => {
     const job = control.then(operation);
     control = job.catch((error: unknown) => {
@@ -76,6 +102,7 @@ export default function journey(pi: ExtensionAPI): void {
     journal = undefined;
     resources = undefined;
     pending = undefined;
+    setDrafting(undefined);
     repository = realpathSync(ctx.cwd);
     const owned = new OwnedResources();
     const store = new Journal(repository, (error) =>
@@ -191,8 +218,123 @@ export default function journey(pi: ExtensionAPI): void {
       throw new Error("Approval was revoked by a session transition");
     }
     store.write(run);
+    setDrafting(undefined);
     coordinator.send({ type: "implementation.requested", run });
   }
+
+  function requestDraft(ctx: ExtensionContext, source: string): void {
+    if (!ctx.isIdle()) throw new Error("Wait for the current response to finish");
+    if (!idle() && !actor?.getSnapshot().matches("delivered"))
+      throw new Error("Stop or resume the existing run first");
+    if (journal?.unfinished()) throw new Error("An unfinished run exists; use /journey resume");
+    setDrafting({ shown: pending?.id });
+    pi.sendUserMessage(draftRequest(source));
+  }
+
+  const controls = (ctx: ExtensionCommandContext) => {
+    if (!actor || !journal || !resources || !ctx.isIdle())
+      throw new Error("No idle coordinator is available");
+    return { actor, journal, resources };
+  };
+  // Modes start work; controls steer a run. The picker and completions read this table
+  const commands: Record<
+    string,
+    {
+      description: string;
+      offered: () => boolean;
+      run: (flags: string[], ctx: ExtensionCommandContext) => Promise<void>;
+    }
+  > = {
+    implement: {
+      description: "Draft a plan from this conversation or an issue, then deliver reviewed PRs",
+      offered: () => true,
+      run: async (flags, ctx) => {
+        const [first = "", ...rest] = flags;
+        const allowChecks = flags.includes("--allow-checks");
+        if (DIGEST.test(first)) {
+          if (rest.some((flag) => flag !== "--allow-checks"))
+            throw new Error("Unknown implement argument");
+          await implement(ctx, first, allowChecks);
+        } else if (allowChecks) {
+          throw new Error("Explicit check approval requires the full plan digest");
+        } else requestDraft(ctx, flags.join(" "));
+      },
+    },
+    ping: {
+      description: "Placeholder mode: the Pi agent answers ping",
+      offered: () => true,
+      run: async (flags, ctx) => {
+        if (flags.length) throw new Error("ping takes no arguments");
+        if (!ctx.isIdle()) throw new Error("Wait for the current response to finish");
+        pi.sendUserMessage("ping");
+      },
+    },
+    status: {
+      description: "Show the run phase, the recorded plan digest, and any blocker",
+      offered: () => true,
+      run: async () => {
+        const snapshot = actor?.getSnapshot();
+        report(
+          `Phase: ${drafting && idle() ? "drafting plan" : String(snapshot?.value ?? "unavailable")}\n` +
+            `Plan digest: ${pending?.digest ?? "none"}\n${snapshot?.context.reason ?? ""}`,
+        );
+      },
+    },
+    stop: {
+      description: "Stop drafting or cancel owned work, then release the repository",
+      offered: () => drafting !== undefined || !idle(),
+      run: async (flags) => {
+        if (flags.length) throw new Error("stop takes no arguments");
+        setDrafting(undefined);
+        await stop();
+      },
+    },
+    resume: {
+      description:
+        "Reconcile the unfinished run and continue it; --accept-edits accepts recovered edits",
+      offered: () => !active() && journal?.unfinished() != null,
+      run: async (flags, ctx) => {
+        if (flags.some((flag) => flag !== "--accept-edits"))
+          throw new Error("Unknown resume argument");
+        const { actor, journal, resources } = controls(ctx);
+        if (!idle() && !actor.getSnapshot().matches("blocked"))
+          throw new Error("Stop the active run before resuming");
+        const run = journal.unfinished();
+        if (!run) throw new Error("No unfinished run exists");
+        resources.reset();
+        await journal.acquire(run.id);
+        if (idle()) actor.send({ type: "run.recovered", run });
+        actor.send({
+          type: "run.resumed",
+          run,
+          acceptRecoveredEdits: flags.includes("--accept-edits"),
+        });
+      },
+    },
+    retire: {
+      description: "Drain and retire the unfinished run, keeping its files, branches, and PRs",
+      offered: () => !active() && journal?.unfinished() != null,
+      run: async (flags, ctx) => {
+        if (flags.length) throw new Error("retire takes no arguments");
+        const { actor, journal } = controls(ctx);
+        const run = journal.unfinished();
+        if (!run) throw new Error("No unfinished run exists");
+        await stop();
+        await journal.acquire(run.id);
+        try {
+          journal.write({ ...(journal.read(run.id) ?? run), checkpoint: "retired" });
+        } finally {
+          await journal.release();
+        }
+        pending = undefined;
+        pi.appendEntry("journey-plan-cleared", { reason: "run-retired", runId: run.id });
+        actor.send({ type: "run.retired" });
+        report(
+          "Run retired after confirmed drain. Files, branches, PRs and history are preserved. Return to the current base and record a new plan before approval.",
+        );
+      },
+    },
+  };
 
   pi.registerTool({
     name: "journey_plan",
@@ -213,8 +355,8 @@ export default function journey(pi: ExtensionAPI): void {
             type: "text",
             text:
               `Plan recorded. Digest ${pending.digest}.\n\n${describeScope(pending)}\n\n` +
-              `The operator can review it with /journey implement ` +
-              `or approve it with /journey implement ${pending.digest} --allow-checks. No implementation was authorized.`,
+              `The operator reviews it in the approval dialog, with /journey implement ${pending.digest}, ` +
+              `or approves it with /journey implement ${pending.digest} --allow-checks. No implementation was authorized.`,
           },
         ],
         details: { digest: pending.digest },
@@ -223,64 +365,33 @@ export default function journey(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("journey", {
-    description:
-      "stop | status | implement [<digest> --allow-checks] | resume [--accept-edits] | retire",
+    description: "Pick a mode (implement, ping) or steer a run (status, stop, resume, retire)",
+    getArgumentCompletions: (prefix) =>
+      prefix.includes(" ")
+        ? null
+        : Object.entries(commands)
+            .filter(([name]) => name.startsWith(prefix))
+            .map(([name, entry]) => ({ value: name, label: name, description: entry.description })),
     handler: async (args, ctx) =>
       lockControl(async () => {
-        const [command = "status", ...flags] = args.trim().split(/\s+/);
-        if (command === "stop") {
-          if (flags.length) throw new Error("stop takes no arguments");
-          await stop();
-        } else if (command === "status" || command === "") {
-          const snapshot = actor?.getSnapshot();
-          report(
-            `Phase: ${String(snapshot?.value ?? "unavailable")}\n` +
-              `Plan digest: ${pending?.digest ?? "none"}\n${snapshot?.context.reason ?? ""}`,
-          );
-        } else if (command === "implement") {
-          const digest = flags.find((flag) => !flag.startsWith("--"));
-          if (flags.some((flag) => flag !== digest && flag !== "--allow-checks"))
-            throw new Error("Unknown implement argument");
-          if (flags.includes("--allow-checks") && !digest)
-            throw new Error("Explicit check approval requires the full plan digest");
-          await implement(ctx, digest, flags.includes("--allow-checks"));
-        } else if (command === "retire") {
-          if (flags.length) throw new Error("retire takes no arguments");
-          if (!actor || !journal || !resources || !ctx.isIdle())
-            throw new Error("No idle coordinator is available");
-          const run = journal.unfinished();
-          if (!run) throw new Error("No unfinished run exists");
-          await stop();
-          await journal.acquire(run.id);
-          try {
-            journal.write({ ...(journal.read(run.id) ?? run), checkpoint: "retired" });
-          } finally {
-            await journal.release();
+        let [name = "", ...flags] = args.trim().split(/\s+/).filter(Boolean);
+        if (!name) {
+          const offered = Object.entries(commands).filter(([, entry]) => entry.offered());
+          if (!ctx.hasUI) {
+            report(`Usage: /journey <${offered.map(([option]) => option).join(" | ")}>`);
+            return;
           }
-          pending = undefined;
-          pi.appendEntry("journey-plan-cleared", { reason: "run-retired", runId: run.id });
-          actor.send({ type: "run.retired" });
-          report(
-            "Run retired after confirmed drain. Files, branches, PRs and history are preserved. Return to the current base and record a new plan before approval.",
+          const choice = await ctx.ui.select(
+            "Pi Journey",
+            offered.map(([option, entry]) => `${option}: ${entry.description}`),
           );
-        } else if (command === "resume") {
-          if (flags.some((flag) => flag !== "--accept-edits"))
-            throw new Error("Unknown resume argument");
-          if (!actor || !journal || !resources || !ctx.isIdle())
-            throw new Error("No idle coordinator is available");
-          if (!idle() && !actor.getSnapshot().matches("blocked"))
-            throw new Error("Stop the active run before resuming");
-          const run = journal.unfinished();
-          if (!run) throw new Error("No unfinished run exists");
-          resources.reset();
-          await journal.acquire(run.id);
-          if (idle()) actor.send({ type: "run.recovered", run });
-          actor.send({
-            type: "run.resumed",
-            run,
-            acceptRecoveredEdits: flags.includes("--accept-edits"),
-          });
-        } else throw new Error("Unknown journey command");
+          if (!choice) return;
+          name = choice.slice(0, choice.indexOf(":"));
+          flags = [];
+        }
+        const entry = Object.hasOwn(commands, name) ? commands[name] : undefined;
+        if (!entry) throw new Error(`Unknown journey command: ${name}`);
+        await entry.run(flags, ctx);
       }),
   });
   pi.on("session_start", async (_event, ctx) => {
@@ -289,6 +400,12 @@ export default function journey(pi: ExtensionAPI): void {
     } catch (error) {
       report(error instanceof Error ? error.message : "Pi Journey initialization failed");
     }
+  });
+  pi.on("agent_settled", (_event, ctx) => {
+    const plan = pending;
+    if (!drafting || !plan || drafting.shown === plan.id) return;
+    drafting.shown = plan.id;
+    void lockControl(() => implement(ctx, plan.digest, false));
   });
   pi.on("before_agent_start", (event) =>
     active()

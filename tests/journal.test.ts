@@ -18,8 +18,8 @@ test("two coordinators cannot own the same repository and ownership releases aft
     assert.deepEqual(first.current(), record);
     await first.release();
     await second.acquire(record.id);
-    second.checkpoint(record, "review");
-    assert.equal(second.current()?.checkpoint, "review");
+    second.checkpoint(record, "impacts");
+    assert.equal(second.current()?.checkpoint, "impacts");
   } finally {
     await first.release();
     await second.release();
