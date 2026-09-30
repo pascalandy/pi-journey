@@ -144,3 +144,38 @@ test("a prepared edit whose bytes landed before a crash admits the next owned wr
     await fixture.cleanup();
   }
 });
+
+test("an external rollback to an earlier owned version stays preserved", async () => {
+  const fixture = await repository();
+  const journal = new Journal(fixture.root);
+  const resources = new OwnedResources();
+  try {
+    const record = run(fixture.root);
+    const unit = record.units[0];
+    assert.ok(unit);
+    execFileSync("git", ["-C", fixture.root, "checkout", "-b", unit.branch], { stdio: "ignore" });
+    await mkdir(join(fixture.root, "src"));
+    const path = join(fixture.root, "src/value.ts");
+    await writeFile(path, "Committed\n");
+    execFileSync("git", ["-C", fixture.root, "add", "src/value.ts"]);
+    execFileSync("git", ["-C", fixture.root, "commit", "-m", "Add baseline"], { stdio: "ignore" });
+    unit.head = execFileSync("git", ["-C", fixture.root, "rev-parse", "HEAD"], {
+      encoding: "utf8",
+    }).trim();
+    await journal.acquire(record.id);
+    journal.write(record);
+    const signal = new AbortController().signal;
+    await writeOwnedFile(record, journal, resources, "src/value.ts", "Owned B\n", signal);
+    await writeOwnedFile(record, journal, resources, "src/value.ts", "Owned C\n", signal);
+    await writeFile(path, "Owned B\n");
+    await assert.rejects(
+      writeOwnedFile(record, journal, resources, "src/value.ts", "Owned D\n", signal),
+      /External change at src\/value.ts/,
+    );
+    assert.equal(await readFile(path, "utf8"), "Owned B\n");
+  } finally {
+    await resources.drain();
+    await journal.release();
+    await fixture.cleanup();
+  }
+});

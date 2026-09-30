@@ -50,8 +50,13 @@ export async function writeOwnedFile(
   const tracked = await git("--literal-pathspecs", "ls-tree", "-z", "--name-only", head, "--", rel);
   const baseline = tracked ? hash(await git("cat-file", "--filters", `${head}:${rel}`)) : null;
   const beforeHash = await fileHash(safe);
-  // A prepared edit counts once its bytes are on disk: the crash came after the write
-  const owned = record.edits.some((edit) => edit.path === rel && edit.afterHash === beforeHash);
+  // The file is owned when it holds the latest edit, including a prepared edit whose
+  // bytes landed before a crash, or the latest confirmed edit when the crash came first.
+  // An older owned version is an external rollback and stays preserved
+  const edits = record.edits.filter((edit) => edit.path === rel);
+  const owned = [edits.at(-1), edits.findLast((edit) => edit.state === "confirmed")].some(
+    (edit) => edit?.afterHash === beforeHash,
+  );
   if (beforeHash !== baseline && !owned) {
     throw new Error(`External change at ${rel}; file preserved`);
   }
