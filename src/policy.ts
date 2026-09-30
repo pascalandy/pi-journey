@@ -1,5 +1,5 @@
 import { lstat, realpath } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, posix, relative, resolve, sep } from "node:path";
 import type { Run } from "./contracts.ts";
 
 export function approvedPaths(run: Run): string[] {
@@ -31,35 +31,33 @@ function metadata(path: string): boolean {
   return normalized.split(sep).includes(".git") || normalized === ".pi/mode-workflow.json";
 }
 
-export function scopeAllows(paths: readonly string[], path: string): boolean {
-  const normalized = path.replaceAll("\\", "/");
+export function canonicalRepoPath(path: string): string {
   if (
+    !path ||
     isAbsolute(path) ||
-    normalized.split("/").some((part) => part === ".." || part.toLowerCase() === ".git") ||
-    normalized.toLowerCase() === ".pi/mode-workflow.json"
-  ) {
-    return false;
-  }
-  return paths.some((scope) => {
-    const prefix = scope.replaceAll("\\", "/").replace(/\/+$/, "");
-    return prefix === "." || normalized === prefix || normalized.startsWith(`${prefix}/`);
-  });
-}
-
-export function validateScope(paths: readonly string[]): void {
-  if (
-    paths.some(
-      (path) =>
-        !path ||
-        isAbsolute(path) ||
-        path
-          .replaceAll("\\", "/")
-          .split("/")
-          .some((part) => part === ".." || part === ".git"),
-    )
+    path.split("/").some((part) => part === ".." || part.toLowerCase() === ".git")
   ) {
     throw new Error("Writable scope must contain repository-relative paths");
   }
+  const normalized = posix.normalize(path).replace(/\/+$/, "") || ".";
+  if (metadata(normalized)) throw new Error("Writable scope cannot include repository metadata");
+  return normalized;
+}
+
+export function scopeAllows(paths: readonly string[], path: string): boolean {
+  try {
+    const normalized = canonicalRepoPath(path);
+    return paths.some((scope) => {
+      const prefix = canonicalRepoPath(scope);
+      return prefix === "." || normalized === prefix || normalized.startsWith(`${prefix}/`);
+    });
+  } catch {
+    return false;
+  }
+}
+
+export function validateScope(paths: readonly string[]): void {
+  for (const path of paths) canonicalRepoPath(path);
 }
 
 export async function writablePath(

@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { type Static, type TSchema, Type } from "typebox";
 import { Check } from "typebox/value";
+import { canonicalRepoPath } from "./policy.ts";
 
 const text = Type.String({ minLength: 1, maxLength: 200_000 });
 const sha = Type.String({ pattern: "^[a-f0-9]{40}$" });
@@ -249,7 +250,7 @@ export function makePlan(input: PlanInput, repository: string): Plan {
     body: input.body,
     units: input.units.map((unit) => ({
       title: unit.title,
-      paths: unit.paths,
+      paths: unit.paths.map(canonicalRepoPath),
       commitMessage: unit.commitMessage,
     })),
     checks: input.checks.map((check) => ({
@@ -331,6 +332,14 @@ export function parseRun(value: unknown): Run {
 
 export function evidence(head: string, passed: boolean, detail: string) {
   return { head, passed, detail, at: new Date().toISOString() };
+}
+
+export function expectedUnitHead(run: Run): string | null {
+  const unit = run.units[run.unitIndex];
+  if (!unit) throw new Error("Workflow unit is absent");
+  return run.plan.delivery === "single" && run.unitIndex > 0 && unit.head === null
+    ? (run.units[run.unitIndex - 1]?.head ?? null)
+    : (unit.head ?? unit.baseHead ?? run.startHead);
 }
 
 export function isCurrentEvidence(unit: Static<typeof UnitSchema>): boolean {

@@ -20,6 +20,16 @@ test("commands preserve argv and report the actual exit code", async () => {
   );
   assert.equal(result.code, 7);
   assert.equal(result.stdout, "$(touch escaped); `id`");
+  const utf8 = await resources.command(
+    [
+      process.execPath,
+      "-e",
+      "process.stdout.write(Buffer.from([0xc3]));setTimeout(()=>process.stdout.write(Buffer.from([0xa9])),50)",
+    ],
+    tmpdir(),
+    new AbortController().signal,
+  );
+  assert.equal(utf8.stdout, "é");
   await resources.drain();
 });
 

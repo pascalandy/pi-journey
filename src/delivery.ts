@@ -3,16 +3,18 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   evidence,
+  expectedUnitHead,
   isCurrentEvidence,
   type Review,
   type Run,
   type Stage,
   type StepResult,
 } from "./contracts.ts";
+import { fileHash } from "./files.ts";
 import { checksReady, GitHub, reviewersReady } from "./github.ts";
 import type { Journal } from "./journal.ts";
 import { approvedPaths, scopeAllows, validateScope } from "./policy.ts";
-import { fileHash, type OwnedResources, type Workers } from "./runner.ts";
+import type { OwnedResources, Workers } from "./runner.ts";
 
 function current(run: Run) {
   const unit = run.units[run.unitIndex];
@@ -131,10 +133,7 @@ export class Delivery {
     if ((await this.git(["branch", "--show-current"], signal)) !== unit.branch) {
       throw new Error("Workflow branch changed outside recorded operations; files are preserved");
     }
-    const expected =
-      run.plan.delivery === "single" && run.unitIndex > 0 && unit.head === null
-        ? run.units[run.unitIndex - 1]?.head
-        : (unit.head ?? unit.baseHead ?? run.startHead);
+    const expected = expectedUnitHead(run);
     if (!expected || (await this.head(signal)) !== expected) {
       throw new Error(
         "Workflow HEAD changed outside recorded operations; preserve it for operator review",
@@ -299,6 +298,14 @@ export class Delivery {
       throw new Error("Workflow process ownership supports Linux and macOS");
     if (!run.grant.executeChecks)
       return { kind: "blocked", run, reason: "Trusted check execution was not granted" };
+    if (!run.config.requiredChecks.length && !run.config.requiredReviewers.length) {
+      return {
+        kind: "blocked",
+        run,
+        reason:
+          "Configure requiredChecks or requiredReviewers before starting; missing remote evidence cannot complete monitoring",
+      };
+    }
     await this.workers.preflight(run, signal);
     if ((await this.git(["rev-parse", "--show-toplevel"], signal)) !== this.repository)
       throw new Error("Run workflow from the repository root");
@@ -464,9 +471,12 @@ export class Delivery {
     }
     await this.assertCleanHead(unit.head ?? "", signal);
     const committedPaths = (
-      await this.git(["diff-tree", "--no-commit-id", "--name-only", "-r", unit.head ?? ""], signal)
+      await this.git(
+        ["diff-tree", "--no-commit-id", "--name-only", "-z", "-r", unit.head ?? ""],
+        signal,
+      )
     )
-      .split("\n")
+      .split("\0")
       .filter(Boolean);
     if (committedPaths.some((path) => !scopeAllows(approvedPaths(run), path))) {
       throw new Error(
@@ -648,6 +658,14 @@ export class Delivery {
   }
 
   async monitor(run: Run, signal: AbortSignal): Promise<StepResult> {
+    if (!run.config.requiredChecks.length && !run.config.requiredReviewers.length) {
+      return {
+        kind: "blocked",
+        run,
+        reason:
+          "Remote evidence requirements are absent; retire this run and configure requiredChecks or requiredReviewers",
+      };
+    }
     const deadline = Date.now() + run.config.monitorTimeoutMs;
     for (;;) {
       let ready = true;

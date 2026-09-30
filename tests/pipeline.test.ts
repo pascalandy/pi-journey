@@ -6,8 +6,9 @@ import test from "node:test";
 import { waitFor } from "xstate";
 import { defaultConfig, makePlan, makeRun, type Review, type Run } from "../src/contracts.ts";
 import { Delivery } from "../src/delivery.ts";
+import { hash } from "../src/files.ts";
 import { Journal } from "../src/journal.ts";
-import { hash, OwnedResources } from "../src/runner.ts";
+import { OwnedResources } from "../src/runner.ts";
 import { createWorkflow } from "../src/workflow.ts";
 import { repository } from "./helpers.ts";
 
@@ -25,6 +26,7 @@ const scenarios: readonly {
   stopPropagation?: boolean;
   lowerThread?: boolean;
   changeOriginDuringLanding?: boolean;
+  missingRemoteConfig?: boolean;
 }[] = [
   { deliveryMode: "single", loseCreateResponse: false, mergeMode: "none" },
   { deliveryMode: "stack", loseCreateResponse: false, mergeMode: "none" },
@@ -44,6 +46,7 @@ const scenarios: readonly {
   { deliveryMode: "single", mergeMode: "none", reviewDefect: true, persistentDefect: true },
   { deliveryMode: "stack", mergeMode: "none", lowerThread: true },
   { deliveryMode: "stack", mergeMode: "land", changeOriginDuringLanding: true },
+  { deliveryMode: "single", mergeMode: "none", missingRemoteConfig: true },
 ];
 for (const {
   deliveryMode,
@@ -59,6 +62,7 @@ for (const {
   stopPropagation = false,
   lowerThread = false,
   changeOriginDuringLanding = false,
+  missingRemoteConfig = false,
 } of scenarios) {
   test(`full ${deliveryMode}, merge=${mergeMode}, lost create=${loseCreateResponse}, lost merge=${loseMergeResponse}, repair=${reviewDefect}, exhausted=${persistentDefect}, missing branch=${missingBranch || missingNextBranch}, changed=${recoveryChange}, prepare interruption=${stopPreparation}, propagation interruption=${stopPropagation}, lower thread=${lowerThread}, active remote change=${changeOriginDuringLanding}`, async () => {
     const fixture = await repository();
@@ -229,7 +233,7 @@ fs.writeFileSync(file,JSON.stringify(state));process.stdout.write(typeof result=
         ...defaultConfig(),
         secondPassSkill: skill,
         retrospectiveSkill: skill,
-        requiredChecks: ["verify"],
+        requiredChecks: missingRemoteConfig ? [] : ["verify"],
         ...(persistentDefect ? { maxRepairRounds: 1 } : {}),
       };
       const plan = makePlan(
@@ -367,6 +371,13 @@ fs.writeFileSync(file,JSON.stringify(state));process.stdout.write(typeof result=
         (snapshot) => snapshot.matches("delivered") || snapshot.matches("blocked"),
         { timeout: 90_000 },
       );
+      if (missingRemoteConfig) {
+        assert.equal(final.value, "blocked");
+        assert.match(final.context.reason, /Configure requiredChecks or requiredReviewers/);
+        assert.equal(writeAttempts, 0);
+        assert.deepEqual(JSON.parse(await readFile(statePath, "utf8")).prs, []);
+        return;
+      }
       if (persistentDefect) {
         assert.equal(final.value, "blocked");
         assert.equal(final.context.reason, "Repair budget exhausted");

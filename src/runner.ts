@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join, relative } from "node:path";
+import { join } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath } from "node:url";
 import {
   createAgentSession,
@@ -19,6 +20,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { Static, TSchema } from "typebox";
 import { parse, ReviewSchema, type Run, WorkerResultSchema } from "./contracts.ts";
+import { writeOwnedFile } from "./files.ts";
 import type { Journal } from "./journal.ts";
 import { approvedPaths, MutationQueue, writablePath } from "./policy.ts";
 
@@ -90,6 +92,8 @@ export class OwnedResources {
           }
           let stdout = "";
           let stderr = "";
+          const stdoutDecoder = new StringDecoder("utf8");
+          const stderrDecoder = new StringDecoder("utf8");
           let failure: Error | null = null;
           let reportedCode: number | undefined;
           let killTimer: ReturnType<typeof setTimeout> | undefined;
@@ -133,16 +137,18 @@ export class OwnedResources {
           });
           input.on("error", () => {});
           output.on("data", (chunk: Buffer) => {
-            stdout += chunk.toString();
+            stdout += stdoutDecoder.write(chunk);
             if (stdout.length + stderr.length > 2_000_000)
               stop(new Error("Command output limit exceeded"));
           });
           errors.on("data", (chunk: Buffer) => {
-            stderr += chunk.toString();
+            stderr += stderrDecoder.write(chunk);
             if (stdout.length + stderr.length > 2_000_000)
               stop(new Error("Command output limit exceeded"));
           });
           child.on("close", (code) => {
+            stdout += stdoutDecoder.end();
+            stderr += stderrDecoder.end();
             clearTimeout(timeout);
             if (killTimer) clearTimeout(killTimer);
             ownedSignal.removeEventListener("abort", abort);
@@ -158,19 +164,6 @@ export class OwnedResources {
           input.end();
         }),
     );
-  }
-}
-
-export function hash(content: Buffer | string): string {
-  return createHash("sha256").update(content).digest("hex");
-}
-
-export async function fileHash(path: string): Promise<string | null> {
-  try {
-    return hash(await readFile(path));
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") return null;
-    throw error;
   }
 }
 
@@ -256,24 +249,7 @@ export class Workers {
       const saveFile = async (path: string, content: string) => {
         ownedSignal.throwIfAborted();
         if (result !== undefined) throw new Error("Task is already complete");
-        this.journal.assertOwned(run.id);
-        const safe = await writablePath(this.repository, paths, path);
-        const record = this.journal.read(run.id) ?? run;
-        const edit: Run["edits"][number] = {
-          unit: run.unitIndex,
-          path: relative(this.repository, safe),
-          beforeHash: await fileHash(safe),
-          afterHash: hash(content),
-          state: "prepared",
-        };
-        record.edits.push(edit);
-        this.journal.write(record);
-        ownedSignal.throwIfAborted();
-        await mkdir(dirname(safe), { recursive: true });
-        await writablePath(this.repository, paths, safe);
-        await writeFile(safe, content);
-        edit.state = "confirmed";
-        this.journal.write(record);
+        await writeOwnedFile(run, this.journal, this.resources, path, content, ownedSignal);
       };
       const write = createWriteToolDefinition(this.repository, {
         operations: { mkdir: async () => {}, writeFile: saveFile },

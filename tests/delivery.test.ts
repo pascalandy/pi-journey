@@ -5,9 +5,10 @@ import { join } from "node:path";
 import test from "node:test";
 import { defaultConfig, evidence, makePlan, makeRun, type Review } from "../src/contracts.ts";
 import { acceptReview, Delivery, deliveryTargets } from "../src/delivery.ts";
+import { fileHash, hash } from "../src/files.ts";
 import { checksReady, type PullRequest, reviewersReady, type Threads } from "../src/github.ts";
 import { Journal } from "../src/journal.ts";
-import { fileHash, hash, OwnedResources } from "../src/runner.ts";
+import { OwnedResources } from "../src/runner.ts";
 import { repository, run } from "./helpers.ts";
 
 const head = "a".repeat(40);
@@ -184,6 +185,17 @@ test("coordinator commits attributable scoped edits and preserves unrelated file
       afterHash: hash("export const value = 1;\n"),
       state: "confirmed",
     });
+    for (const path of ["src/café.ts", "src/back\\slash.ts", "src/line\nbreak.ts"]) {
+      const content = "export const value = 2;\n";
+      await writeFile(join(fixture.root, path), content);
+      record.edits.push({
+        unit: 0,
+        path,
+        beforeHash: null,
+        afterHash: hash(content),
+        state: "confirmed",
+      });
+    }
     journal.write(record);
     const unavailable = async (): Promise<never> => {
       throw new Error("Unexpected worker invocation");
@@ -222,6 +234,14 @@ test("coordinator commits attributable scoped edits and preserves unrelated file
       /value = 1/,
     );
     assert.equal(committed.run.operations.at(-1)?.state, "confirmed");
+    for (const path of ["src/café.ts", "src/back\\slash.ts", "src/line\nbreak.ts"]) {
+      assert.equal(
+        execFileSync("git", ["-C", fixture.root, "show", `${committedHead}:${path}`], {
+          encoding: "utf8",
+        }),
+        "export const value = 2;\n",
+      );
+    }
     assert.equal(committed.run.units[0]?.checks, null);
     await writeFile(join(fixture.root, "unrelated"), "preserve me");
     await assert.rejects(

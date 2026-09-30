@@ -6,6 +6,7 @@ import {
   appendPlanningFooter,
   MutationQueue,
   planningAdmission,
+  scopeAllows,
   validateScope,
   writablePath,
 } from "../src/policy.ts";
@@ -57,6 +58,8 @@ test("scoped writes reject repository escape, metadata, symlink escape, and hard
     await assert.rejects(() => writablePath(fixture.root, ["src"], "src/two"), /hard-linked/);
     assert.equal(await readFile(join(fixture.root, "other", "secret"), "utf8"), "preserve");
     assert.throws(() => validateScope(["src/../other"]), /relative/);
+    assert.equal(scopeAllows(["./src"], "src/café.ts"), true);
+    await assert.rejects(() => writablePath(fixture.root, ["src"], "src\\probe.ts"), /scope/);
   } finally {
     await fixture.cleanup();
   }
