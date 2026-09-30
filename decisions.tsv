@@ -1,0 +1,5 @@
+ts	phase	decision	why	evidence	result
+2026-09-30T04:46:52Z	frame	Create a standalone Pi package and leave its delivery PR unmerged	Pascal selected the repository path and asked to review the PR tomorrow	plan.html	scope recorded
+2026-09-30T04:46:52Z	design	Choose one XState coordinator with controlled SDK jobs	Four independent same-model candidates and a cross-judge converged on explicit ownership	plan.html#cmo	design selected
+2026-09-30T04:49:00Z	artifact	Keep browser rendering unverified after shared automation failures	Loopback HTTP succeeds but corrected preview navigation and snapshot calls fail	plan.html	visual check INCONCLUSIVE
+2026-09-30T04:59:33Z	review	Resolve Astra plan findings before source implementation	Commit-bound checks, command trust, atomic merge, ownership, stack semantics, and recovery needed explicit contracts	plan.html#fmo	plan revised

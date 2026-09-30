@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pi mode workflow · implementation plan</title>
+<style>
+:root{color-scheme:dark;--bg:#000;--fg:#fff;--muted:#bdbdbd;--line:#373737;--surface:#141414;--measure:74ch;--mono:ui-monospace,SFMono-Regular,Consolas,monospace}
+*{box-sizing:border-box}html{scroll-behavior:auto}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 system-ui,sans-serif}main{max-width:1160px;margin:auto;padding:40px 32px 80px}h1{font-size:clamp(1.8rem,4vw,2.7rem);line-height:1.15;margin:0 0 22px}h2{font-size:1.55rem;line-height:1.25;margin:0 0 18px}h3{font-size:1.1rem;margin:26px 0 12px}p{max-width:var(--measure);margin:12px 0}a{color:#fff;text-decoration-thickness:1px;text-underline-offset:3px}a:focus-visible,summary:focus-visible{outline:2px solid #fff;outline-offset:5px}nav{display:flex;flex-wrap:wrap;gap:10px 24px;border-block:1px solid var(--line);padding:16px 0;margin:26px 0 34px}section{border-top:1px solid var(--line);padding-top:28px;margin-top:34px;scroll-margin-top:18px}ul,ol{max-width:var(--measure);padding-left:23px}li{padding:3px 0}code,pre{font-family:var(--mono);font-size:.88em}pre{background:var(--surface);padding:18px;white-space:pre;overflow:auto;border-left:2px solid #fff;max-width:100%}.table-wrap{overflow:auto;max-width:100%;border-block:1px solid var(--line);margin:20px 0}table{border-collapse:collapse;width:100%;min-width:590px;text-align:left;font-size:.92rem}th,td{vertical-align:top;padding:13px 12px;border-bottom:1px solid var(--line)}th:first-child,td:first-child{padding-left:0}th{font-weight:650}tr:last-child td{border-bottom:0}.facts{display:grid;grid-template-columns:150px 1fr;gap:8px 20px;margin:22px 0;max-width:var(--measure)}.facts dt{font-weight:650}.facts dd{margin:0;overflow-wrap:anywhere}.flow{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-block:1px solid var(--line);margin:22px 0}.flow div{padding:18px;border-right:1px solid var(--line)}.flow div:last-child{border-right:0}.flow strong{display:block;margin-bottom:7px}.small{font-size:.9rem;color:var(--muted)}details{margin:18px 0;border-block:1px solid var(--line);padding:14px 0}summary{cursor:pointer;font-weight:650}footer{margin-top:42px;border-top:1px solid var(--line);padding-top:18px}.nowrap{white-space:nowrap}@media(max-width:620px){main{padding:24px 18px 50px}.facts{grid-template-columns:1fr;gap:3px}.facts dd{margin-bottom:10px}.flow{grid-template-columns:1fr}.flow div{border-right:0;border-bottom:1px solid var(--line)}.flow div:last-child{border-bottom:0}nav{gap:9px 19px}h2{font-size:1.35rem}}@media print{body{background:#fff;color:#000;font-size:11pt}a{color:#000}main{padding:0;max-width:none}nav{display:none}pre{background:#eee;color:#000;white-space:pre-wrap}section{break-inside:avoid}.table-wrap{overflow:visible}table{min-width:0}details>*{display:block}}
+</style>
+</head>
+<body><main>
+<h1>Pi mode workflow</h1>
+<p>Two visible modes. One owned implementation workflow. Planning protects the repository; Implementation moves an accepted plan through verified delivery.</p>
+<dl class="facts">
+<dt>Audience</dt><dd>Pascal and the engineer reviewing this extension</dd>
+<dt>Source</dt><dd><code>/home/pascal/Projects/pi-mode-workflow</code></dd>
+<dt>Current delivery</dt><dd>Private GitHub repository and a regular PR. Leave this PR unmerged for Pascal</dd>
+<dt>Runtime baseline</dt><dd>Pi SDK 0.99.1, XState 5.32.5, TypeScript, pnpm</dd>
+<dt>Design status</dt><dd>Astra high reviewed the initial publication. Boundary findings are incorporated below</dd>
+</dl>
+<nav aria-label="Plan sections"><a href="#alignment">Alignment</a><a href="#cmo">CMO</a><a href="#fmo">FMO</a><a href="#verification">Verification</a><a href="#premortem">Premortem</a><a href="#sources">Sources</a></nav>
+
+<section id="alignment"><h2>Alignment</h2>
+<p>Pascal wants to share an idea in Pi, investigate it without changing the repository, approve a concrete plan with a command or shortcut, and let an explicit state machine own implementation, checks, independent review, feedback, publication, and authorized merging.</p>
+<p>The problem is that a long prompt describes intent but does not own permissions, cancellation, recovery, or proof that a step actually completed. The extension adds those boundaries while keeping the visible experience small.</p>
+<h3>Use cases and edges</h3>
+<ul>
+<li>Investigate an idea, identify scope and edge cases, and ask only about decisions that change the plan</li>
+<li>Present CMO, FMO, and a ranked premortem, with the exact Planning footer</li>
+<li>Replace a plan and invalidate approval for its previous digest</li>
+<li>Start Implementation from a trusted operator command or shortcut, never from model prose</li>
+<li>Execute ordered units with exclusive repository ownership, serialized file tools, small commits, and configured checks</li>
+<li>Run a second pass and an independent read-only reviewer against the current Git revision</li>
+<li>Fix valid findings within a bounded budget and repeat affected evidence</li>
+<li>Deliver a single PR or an ordered linear stack when the selected delivery capability is available</li>
+<li>Poll new checks and reviews incrementally while preserving and reconciling all unresolved findings</li>
+<li>Merge only with run-specific authorization and fresh positive evidence</li>
+<li>Return to Planning while work is active, without admitting new writes or leaving an unowned worker</li>
+<li>Recover after reload, crash, branch navigation, missing credentials, or an uncertain external result</li>
+</ul>
+<h3>Scope</h3>
+<p>Include a Pi extension, controlled SDK jobs, one XState coordinator, a durable journal, deterministic Git and GitHub adapters, tests, and an isolated integration harness. Configuration names the allowed commands, skill sources, reviewer, budgets, and delivery policy.</p>
+<p>Exclude a daemon, graphical dashboard, general workflow DSL, a parallel writer fleet, personal skill edits, production deployment, and automatic daily-driver installation. Arbitrary shell is not exposed to implementation workers. Stack capability failures pause explicitly; they do not silently become a large single PR.</p>
+</section>
+
+<section id="cmo"><h2>CMO (current Mode of operation)</h2>
+<p>Pascal manually pastes Planning and Implementation prompts and supervises the transitions. The prompts specify useful behavior, but the host agent still controls tool use and reports progress in prose. A mode name alone cannot prove that writes are blocked, an agent stopped, a review covers the current commit, or a remote mutation already happened.</p>
+<p>The new repository starts empty. The source audit selected <code>pi-until</code> for lifecycle ownership and delivery coordination. Bellwether contributes coordination patterns, with a pending-gate recovery flaw to avoid. Fast-JEV contributes staged, append-only records. Workflow OS contributes orchestration ideas, but its runtime code is older and owns effects less directly.</p>
+<div class="table-wrap"><table><thead><tr><th>Approach</th><th>Benefit</th><th>Constraint</th></tr></thead><tbody>
+<tr><td>Continue the foreground Pi conversation</td><td>Fewest sessions</td><td>User turns, queued input, other extensions, and workflow completion share ownership</td></tr>
+<tr><td>One coordinator with controlled SDK jobs</td><td>Owns tools, worker lifetime, evidence, and recovery</td><td>Requires a small session adapter and explicit summaries</td></tr>
+<tr><td>External RPC supervisor</td><td>Process isolation</td><td>Adds an extra process protocol and recovery owner</td></tr>
+</tbody></table></div>
+<p><strong>Recommendation:</strong> one XState coordinator with controlled SDK jobs. Four independent planners converged on this shape. All four used GPT-6 Astra medium, so this is same-model agreement. A separate cross-judge selected candidate D and borrowed run grants, plan-digest approval, and SHA-bound receipts from the others.</p>
+</section>
+
+<section id="fmo"><h2>FMO (future Mode of operation)</h2>
+<div class="flow"><div><strong>Planning</strong>Investigate, align, record a plan, ask only consequential questions</div><div><strong>Implementation</strong>Execute accepted scope through owned jobs and verified gates</div><div><strong>Delivery</strong>Return a reviewable PR, or merge when that run explicitly permits it</div></div>
+<h3>Happy path</h3>
+<ol>
+<li>Load the extension in an isolated Pi session. Planning is the default</li>
+<li>Inject the supplied Planning instructions. Allow known read tools and a plan-recording tool</li>
+<li>Record plan text, writable scope, ordered units, required checks, and a content digest</li>
+<li>The operator runs <code>/workflow implement</code> or the shortcut to approve that exact digest. <code>--merge</code> separately grants eventual merge authority for this run</li>
+<li>Acquire exclusive ownership of the canonical repository/worktree. Preflight identity, cleanliness, tools, model access, skills, command-execution grants, and delivery configuration</li>
+<li>One SDK worker executes each unit with scoped edits. The coordinator verifies scope, creates a commit, runs authoritative checks against that clean committed tree, and confirms that checks did not change source content</li>
+<li>Run the configured second-pass skill, display the exact Codex command, then launch GPT-6 Astra high in read-only mode</li>
+<li>Validate findings, repair within the configured budget, and invalidate review and check evidence when HEAD changes</li>
+<li>Publish regular PRs through the selected single or linear-stack adapter. Record their exact repository, branch, base, head, and URL</li>
+<li>Observe current checks and reviews. Unknown, pending, failed, stale, or unresolved evidence cannot satisfy a gate</li>
+<li>With merge authority, recheck the remote head and required gates. The merge request itself includes the expected head SHA and respects server-enforced branch requirements. A moved head rejects the request. Otherwise deliver the PR unmerged</li>
+<li>Run the configured retrospective and report the outcome, uncertainty, and remaining decisions</li>
+</ol>
+<h3>Ownership and data</h3>
+<p>The machine owns finite modes and transitions. Context holds an immutable accepted plan, run-specific grants, unit position, operation receipts, and evidence. UI and tool policy derive their state from the machine. No second mutable mode registry exists.</p>
+<pre aria-label="Conceptual state sequence">Planning
+  → preflight → work unit → commit → authoritative checks
+  → second pass → external review → bounded repair
+  → publish → monitor → merge gate → retrospective → delivered
+
+Any active step → stopping → Planning, after confirmed drain
+Any unresolved gate → blocked, with a typed reason
+Restart → reconciliation, with effects closed</pre>
+<p>Modules own domain knowledge: Pi integration, workflow state, capability policy, worker lifetime, repository delivery, and validated journal data. They are not one file per temporal stage.</p>
+<h3>Permissions</h3>
+<p>Planning denies unknown tools, edit, write, arbitrary shell, nested bypass tools, and user-bash execution. Active tool declarations improve model behavior; a fail-closed <code>tool_call</code> guard supplies enforcement. Coordinator bookkeeping and the normal Pi transcript may persist, but model work cannot mutate repository files.</p>
+<p>Implementation workers receive scoped read and file-edit tools. They receive no arbitrary shell, credential management, GitHub mutation, or self-approval tool. The coordinator owns checks, Git, and GitHub effects. Path admission checks canonical targets, symlinks, repository metadata, and writable scope. Each complete read-modify-write operation is serialized.</p>
+<p>Configured checks execute repository code, including code the worker can edit. Their filesystem and network effects are an explicit trust boundary. The operator separately grants execution of those named commands and their stated effects; absent that grant, preflight blocks. Scoped file admission does not sandbox check scripts. An OS sandbox is required for users who need to constrain arbitrary repository code, and is outside this first version.</p>
+<p>This is an enforced boundary for mediated file tools and owned jobs. It is not an operating-system sandbox against approved check scripts, arbitrary co-loaded extension JavaScript, or adversarial filesystem races. Supported execution uses controlled SDK resources without ambient extensions.</p>
+<h3>Cancellation, recovery, and uncertainty</h3>
+<p>Returning to Planning closes admission synchronously, requests cancellation, waits for SDK idle and owned process exit, then displays Planning. While draining, the visible state remains Stopping. Late results cannot advance another run. Local drainage cannot undo an already accepted remote action; retain uncertain intents, observe them, and report uncertainty before claiming a settled delivery outcome.</p>
+<p>A versioned journal belongs to the repository and run, independently of conversation branches. Its coordinator metadata is untracked and excluded from worker editing. Acquire a cross-process ownership lock before effects. Record the owner and release only after drain. Reject a second live owner. Stale-owner recovery verifies that the owner is gone before acquiring ownership and reconciling; uncertainty blocks.</p>
+<p>Store intent before an external mutation and an observed receipt afterward. On restart, inspect Git and GitHub before resuming. Never start restored effectful actors directly or replay PR creation or merging because a completion receipt is absent. Preserve dirty content after a crash. Explicit resume can accept attributable in-scope edits; unrelated or unattributable changes remain blocked. No reset, cleanup, or deletion hides them.</p>
+<p>Preserve the causal phase and pending decision. Changed plan digests revoke approval. Changed heads invalidate affected evidence. Changed repository identity, missing capabilities, conflicts, exhausted budgets, and ambiguous observations produce a named blocked state. Persist outstanding review findings independently of the polling cursor. A new push must reconcile older unresolved findings, not discard them.</p>
+<h3>Linear-stack delivery</h3>
+<p>When selected, ordered units map to ordered branches. Each branch starts from the preceding unit's committed head. Publish PRs bottom-up against their actual dependent bases. Record and verify checks, independent review, and unresolved findings for every PR's base and head. Land only the contiguous verified prefix.</p>
+<p>After an ancestor lands, reconcile each remaining base against the destination branch, retarget the next eligible PR, and refresh affected evidence. Use merge commits that preserve ancestry. Never force-push or silently rebase. Conflicts, unsupported server policy, or a required destructive history rewrite block with a concrete decision. A changed descendant head invalidates its previous evidence.</p>
+<h3>Canonical Planning instructions</h3>
+<p><code>prompts/planning.md</code> owns the runtime text. This generated snapshot supplies the literal AC-01 expectation. <code>scripts/plan-prompt.mjs --check</code> detects drift.</p>
+<!-- planning-prompt:start --><pre id="planning-prompt">Stay in **planning** until I say "implement": read and investigate freely, change nothing. End every response with: "— We are in the Planning Phase"
+
+**First: alignment**
+
+1. Restate my goal and the problem in your own words, including what's out of scope.
+2. List the use cases, edge cases included.
+3. Investigate the code and docs first, then ask only about decisions that are mine to make and would change the plan.
+
+If you have questions, stop there and wait for my answers. If you have none, go straight to the solution.
+
+**Then: solution**
+
+If several approaches fit, compare them in a few lines and recommend one. Write the following for the recommended approach only:
+
+## CMO (current Mode of operation)
+
+How it works today and the problems it causes.
+
+## FMO (future Mode of operation)
+
+The happy path, how it handles each edge case, and how we'll verify it works.
+
+### Premortem
+
+Imagine the implementation failed, either mid-build or in the first weeks of use. List the most likely reasons, ranked. For each: the cause, the early warning sign, and the change you made to the FMO to prevent it.
+
+**Questions**
+
+Order by impact, at most 5 per round. Mark your recommendation and say in one line why each question matters, so I can reply "1a, 2b":
+
+1) Question… (why it matters)
+   - a) … (recommended)
+   - b) …
+   - c) …
+
+If you have no questions, write:
+
+0) No questions, everything is decided. Say "implement" when you're ready.
+</pre><!-- planning-prompt:end -->
+<h3>Ordered build units</h3>
+<ol>
+<li>Establish schemas, prompts, mode policy, and a runnable offline verification harness</li>
+<li>Implement the machine, run approval, evidence gates, and journal recovery</li>
+<li>Implement owned SDK workers, scoped writes, fixed command execution, and abort/drain</li>
+<li>Implement Git delivery, Codex review, bounded repair, observation, merge gating, and retrospective</li>
+<li>Wire the Pi adapter and verify the actual extension through an isolated SDK session</li>
+<li>Run self-check, independent review, acceptance QA, and private GitHub CI. Deliver an unmerged PR</li>
+</ol>
+</section>
+
+<section id="verification"><h2>How we verify the FMO</h2>
+<div class="table-wrap"><table><thead><tr><th>ID</th><th>Observable acceptance</th><th>Evidence</th></tr></thead><tbody>
+<tr><td>AC-01</td><td>Planning uses the exact prompt and footer</td><td>Finalized-message and prompt tests through the real adapter</td></tr>
+<tr><td>AC-02</td><td>Direct, nested, unknown, and shell write paths are denied in Planning</td><td>Tool-dispatch tests and isolated SDK integration</td></tr>
+<tr><td>AC-03</td><td>Only an operator event approves the current plan digest</td><td>Command, shortcut, stale-plan, and model-origin tests</td></tr>
+<tr><td>AC-04</td><td>Mediated file writes stay within approved canonical paths and avoid repository metadata</td><td>Temporary repository, symlink, path-escape, and metadata tests; check execution requires its separate grant</td></tr>
+<tr><td>AC-05</td><td>Planning is displayed only after owned jobs drain</td><td>Interrupt a delayed worker and process; prove no late write</td></tr>
+<tr><td>AC-06</td><td>Checks and reviews certify clean committed content at their actual SHA</td><td>Real temporary Git repository; a check that changes tracked content cannot pass the evidence gate</td></tr>
+<tr><td>AC-07</td><td>External review shows its exact command, enforces read-only, and rejects empty or malformed results</td><td>Process protocol tests and a real independent reviewer run</td></tr>
+<tr><td>AC-08</td><td>Repairs invalidate old evidence and terminate at the configured budget</td><td>State-machine behavior tests with literal expected outcomes</td></tr>
+<tr><td>AC-09</td><td>Missing, pending, failed, stale, or unresolved remote evidence prevents merge</td><td>Forge contract fixtures and gate negative controls</td></tr>
+<tr><td>AC-10</td><td>No merge occurs without the current run's grant, atomic expected-head match, and server requirements</td><td>Denied grant, missing server gates, and a head change between observation and merge request</td></tr>
+<tr><td>AC-11</td><td>Recovery reconciles uncertain publication or merge without duplicating it</td><td>Fault injection around durable intent and receipt boundaries</td></tr>
+<tr><td>AC-12</td><td>Actual Pi loads the extension and its commands without changing daily-driver settings</td><td>Isolated SDK and explicit-extension smoke checks</td></tr>
+<tr><td>AC-13</td><td>Only one coordinator owns a checkout; sibling file mutations serialize</td><td>Two real coordinator instances and concurrent tool calls</td></tr>
+<tr><td>AC-14</td><td>Crash recovery preserves dirty edits and requires explicit acceptance before continuing</td><td>Interrupt a file edit and commit boundary; attributable and unrelated dirty-tree cases</td></tr>
+<tr><td>AC-15</td><td>A two-PR stack cannot land past a failed lower layer or stale descendant evidence</td><td>Bottom-up publication, per-layer review, base reconciliation, and moved-head cases</td></tr>
+<tr><td>AC-16</td><td>An older unresolved finding remains blocking after a new push</td><td>Persistent finding ledger and full unresolved-thread reconciliation</td></tr>
+</tbody></table></div>
+<p>Tests use observable results, not copied source shapes. Pure machine tests own transitions; adapter tests own host contracts; temporary Git and process tests own real filesystem and lifetime behavior. Live credentials and remote effects are reported separately from fixture-backed proof.</p>
+</section>
+
+<section id="premortem"><h2>Premortem</h2>
+<p>Assume the build failed or the first weeks of use produced a misleading success. These are the most likely causes, ranked. Each mitigation is already part of the FMO.</p>
+<div class="table-wrap"><table><thead><tr><th>Rank and failure</th><th>Cause</th><th>Early warning</th><th>FMO change</th></tr></thead><tbody>
+<tr><td>1 · Planning still writes</td><td>Tool declarations are mistaken for permissions</td><td>An inactive or nested tool executes</td><td>Deny-by-default dispatch policy, user-bash interception, controlled resources</td></tr>
+<tr><td>2 · Stopping leaves work alive</td><td>Actor exit is mistaken for resource termination</td><td>A write appears after the mode label changes</td><td>Close admission, cancel, await actual drain, then enter Planning</td></tr>
+<tr><td>3 · Recovery duplicates a remote action</td><td>A missing receipt is mistaken for an unexecuted command</td><td>Two PRs or an attempted second merge</td><td>Durable intent, external identity, reconciliation, explicit resume</td></tr>
+<tr><td>4 · An old review approves new code</td><td>Evidence is attached to a run instead of its exact revision</td><td>Green review survives a new commit</td><td>Repository, plan, base, and head binding; invalidate evidence after changes</td></tr>
+<tr><td>5 · The loop burns time without progress</td><td>Unbounded retries or missing capabilities are hidden</td><td>Repeated identical failures or reviewer substitution</td><td>Capability preflight, bounded repair and observation, typed blocked reasons</td></tr>
+<tr><td>6 · The adapter becomes the system</td><td>UI callbacks accumulate business rules and mutable state</td><td>Mode, permission, and delivery facts disagree</td><td>One machine, ownership-based modules, thin Pi wiring, proof at real boundaries</td></tr>
+</tbody></table></div>
+</section>
+
+<section id="sources"><h2>Sources and remaining proof</h2>
+<ul>
+<li><a href="https://github.com/statelyai/skills/blob/e7874e5/skills/xstate-v5/SKILL.md">Stately XState v5 skill</a></li>
+<li><a href="https://github.com/joelhooks/pi-until/blob/4096bcb/src/follow-up.ts">Pi Until delivery protocol</a></li>
+<li><a href="https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md">Pi extension contracts</a></li>
+<li><a href="https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/sdk.md">Pi SDK lifecycle</a></li>
+</ul>
+<p>Local installed Pi 0.99.1 documentation and CLI help establish current capabilities. Live reviewer authentication, exact SDK typing, forge delivery, and cold-lifecycle behavior must be verified during implementation. No local source check is presented as live deployment proof.</p>
+<p><strong>Questions:</strong> 0) No questions, everything is decided for this implementation. Pascal has said “implement”. Technical uncertainties become executable checks and named blockers, not silent assumptions.</p>
+</section>
+<footer><p>One self-contained HTML file. No external scripts, fonts, stylesheets, or live API dependencies. Linked sources open only on request.</p></footer>
+</main></body></html>
