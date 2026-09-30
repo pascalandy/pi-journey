@@ -16,6 +16,7 @@ type Event =
   | { type: "implementation.requested"; run: Run }
   | { type: "planning.requested" }
   | { type: "run.recovered"; run: Run }
+  | { type: "run.retired" }
   | { type: "run.resumed"; acceptRecoveredEdits: boolean; run?: Run }
   | { type: "ownership.lost"; reason: string };
 
@@ -152,6 +153,7 @@ export function workflowMachine(ports: WorkflowPorts) {
     states: {
       planning: {
         on: {
+          "run.retired": { actions: assign({ run: null, reason: "" }) },
           "implementation.requested": { target: "preflight", actions: "accept" },
           "run.recovered": { target: "blocked", actions: "accept" },
         },

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import {
@@ -9,6 +9,8 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
+import { defaultConfig, makePlan, makeRun, type PlanInput, parse } from "../src/contracts.ts";
 import modeWorkflow from "../src/index.ts";
 import { PLANNING_FOOTER } from "../src/policy.ts";
 import { repository } from "./helpers.ts";
@@ -33,11 +35,12 @@ test("real Pi SDK registers the extension and enforces Planning across tool and 
     settingsManager: settings,
   });
   await loader.reload();
+  const manager = SessionManager.inMemory(fixture.root);
   const { session } = await createAgentSession({
     cwd: fixture.root,
     resourceLoader: loader,
     settingsManager: settings,
-    sessionManager: SessionManager.inMemory(fixture.root),
+    sessionManager: manager,
     modelRuntime: await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }),
     tools: ["read", "workflow_plan"],
   });
@@ -79,7 +82,8 @@ test("real Pi SDK registers the extension and enforces Planning across tool and 
         { name: "check", argv: ["node", "--version"], effects: "Reads version", timeoutMs: 1_000 },
       ],
       delivery: "single",
-    };
+    } satisfies PlanInput;
+    const beforePlan = manager.appendCustomEntry("checkpoint", {});
     const result = await plan.execute(
       "plan",
       proposal,
@@ -88,6 +92,19 @@ test("real Pi SDK registers the extension and enforces Planning across tool and 
       runner.createToolContext("plan", undefined),
     );
     assert.match(JSON.stringify(result), /Plan recorded/);
+    const leafA = manager.getLeafId();
+    assert.ok(leafA);
+    const digestSchema = Type.Object({ digest: Type.String({ pattern: "^[a-f0-9]{64}$" }) });
+    const digestA = parse(digestSchema, result.details, "receipt").digest;
+    const resultB = await plan.execute(
+      "plan-b",
+      { ...proposal, goal: "Another idea" },
+      undefined,
+      undefined,
+      runner.createToolContext("plan-b", undefined),
+    );
+    const digestB = parse(digestSchema, resultB.details, "receipt").digest;
+    await session.navigateTree(leafA, { summarize: false });
     const command = runner.getCommand("workflow");
     assert.ok(command);
     await command.handler(
@@ -102,6 +119,47 @@ test("real Pi SDK registers the extension and enforces Planning across tool and 
       null,
       "grant without a digest cannot create a run",
     );
+    await command.handler(`implement ${digestB} --allow-checks`, runner.createCommandContext());
+    assert.equal(
+      new Journal(fixture.root).current(),
+      null,
+      "a proposal abandoned by tree navigation cannot be approved",
+    );
+    await session.navigateTree(beforePlan, { summarize: false });
+    await command.handler(`implement ${digestA} --allow-checks`, runner.createCommandContext());
+    assert.equal(
+      new Journal(fixture.root).current(),
+      null,
+      "navigating before any proposal clears approval",
+    );
+    const retired = makeRun(makePlan(proposal, fixture.root), defaultConfig(), {
+      executeChecks: true,
+      merge: false,
+    });
+    const store = new Journal(fixture.root);
+    await store.acquire(retired.id);
+    store.write({ ...retired, checkpoint: "blocked" });
+    await store.release();
+    await writeFile(join(fixture.root, "preserve"), "Human work");
+    await command.handler("retire", runner.createCommandContext());
+    assert.equal(store.current()?.checkpoint, "retired");
+    assert.equal(await readFile(join(fixture.root, "preserve"), "utf8"), "Human work");
+    assert.ok(store.read(retired.id), "retirement retains the run history");
+    const fresh = await plan.execute(
+      "fresh-plan",
+      proposal,
+      undefined,
+      undefined,
+      runner.createToolContext("fresh-plan", undefined),
+    );
+    const freshDigest = parse(digestSchema, fresh.details, "receipt").digest;
+    await command.handler(`implement ${freshDigest} --allow-checks`, runner.createCommandContext());
+    assert.notEqual(
+      store.current()?.id,
+      retired.id,
+      "a retired run can be replaced by a fresh approval",
+    );
+    await command.handler("plan", runner.createCommandContext());
     const footer = await runner.emitMessageEnd({
       type: "message_end",
       message: {

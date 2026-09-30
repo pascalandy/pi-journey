@@ -133,9 +133,11 @@ export default function modeWorkflow(pi: ExtensionAPI): void {
     });
     coordinator.start();
     const prior = store.current();
-    if (prior && prior.checkpoint !== "delivered")
+    if (prior && !["delivered", "retired"].includes(prior.checkpoint))
       coordinator.send({ type: "run.recovered", run: prior });
     for (const entry of ctx.sessionManager.getBranch()) {
+      if (entry.type === "custom" && entry.customType === "workflow-plan-cleared")
+        pending = undefined;
       if (entry.type === "custom" && entry.customType === "workflow-plan") {
         pending = parse(PlanSchema, entry.data, "session plan");
         if (pending.repository !== repository) pending = undefined;
@@ -181,7 +183,7 @@ export default function modeWorkflow(pi: ExtensionAPI): void {
     if (pending?.digest !== proposal.digest || approvalEpoch !== epoch)
       throw new Error("Plan changed while approval was open");
     const prior = store.current();
-    if (prior && prior.checkpoint !== "delivered")
+    if (prior && !["delivered", "retired"].includes(prior.checkpoint))
       throw new Error("An unfinished run exists; use /workflow resume");
     const configurationPath = join(repository, ".pi", "mode-workflow.json");
     let overrides: unknown = {};
@@ -240,7 +242,7 @@ export default function modeWorkflow(pi: ExtensionAPI): void {
 
   pi.registerCommand("workflow", {
     description:
-      "plan | status | implement <digest> --allow-checks [--merge] | resume [--accept-edits]",
+      "plan | status | implement <digest> --allow-checks [--merge] | resume [--accept-edits] | retire",
     handler: async (args, ctx) =>
       lockControl(async () => {
         const [command = "status", ...flags] = args.trim().split(/\s+/);
@@ -262,6 +264,26 @@ export default function modeWorkflow(pi: ExtensionAPI): void {
           if (flags.includes("--allow-checks") && !digest)
             throw new Error("Explicit check approval requires the full plan digest");
           await implement(ctx, digest, flags.includes("--allow-checks"), flags.includes("--merge"));
+        } else if (command === "retire") {
+          if (flags.length) throw new Error("retire takes no arguments");
+          if (!actor || !journal || !resources || !ctx.isIdle())
+            throw new Error("No idle coordinator is available");
+          const run = journal.current();
+          if (!run || ["delivered", "retired"].includes(run.checkpoint))
+            throw new Error("No unfinished run exists");
+          await stop();
+          await journal.acquire(run.id);
+          try {
+            journal.write({ ...(journal.read(run.id) ?? run), checkpoint: "retired" });
+          } finally {
+            await journal.release();
+          }
+          pending = undefined;
+          pi.appendEntry("workflow-plan-cleared", { reason: "run-retired", runId: run.id });
+          actor.send({ type: "run.retired" });
+          report(
+            "Run retired after confirmed drain. Files, branches, PRs and history are preserved. Return to the current base and record a new plan before approval.",
+          );
         } else if (command === "resume") {
           if (flags.some((flag) => flag !== "--accept-edits"))
             throw new Error("Unknown resume argument");
@@ -270,7 +292,8 @@ export default function modeWorkflow(pi: ExtensionAPI): void {
           if (!planning() && !actor.getSnapshot().matches("blocked"))
             throw new Error("Stop the active run before resuming");
           const run = journal.current();
-          if (!run || run.checkpoint === "delivered") throw new Error("No unfinished run exists");
+          if (!run || ["delivered", "retired"].includes(run.checkpoint))
+            throw new Error("No unfinished run exists");
           resources.reset();
           await journal.acquire(run.id);
           if (planning()) actor.send({ type: "run.recovered", run });
@@ -337,5 +360,9 @@ export default function modeWorkflow(pi: ExtensionAPI): void {
   });
   pi.on("session_before_switch", () => stop());
   pi.on("session_before_fork", () => stop());
+  pi.on("session_before_tree", () => stop());
+  pi.on("session_tree", async (_event, ctx) => {
+    await initialize(ctx);
+  });
   pi.on("session_shutdown", () => stop());
 }
