@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { waitFor } from "xstate";
 import type { StepResult } from "../src/contracts.ts";
-import { createWorkflow } from "../src/workflow.ts";
+import { createJourney } from "../src/journey.ts";
 import { run } from "./helpers.ts";
 
 test("a run does not start until an operator event approves it", async () => {
   const stages: string[] = [];
-  const actor = createWorkflow({
+  const actor = createJourney({
     execute: async (stage, current) => {
       stages.push(stage);
       return { kind: "passed", run: current };
@@ -15,7 +15,7 @@ test("a run does not start until an operator event approves it", async () => {
     drain: async () => {},
     save: () => {},
   }).start();
-  assert.equal(actor.getSnapshot().value, "planning");
+  assert.equal(actor.getSnapshot().value, "idle");
   assert.deepEqual(stages, []);
   actor.send({ type: "implementation.requested", run: run() });
   await waitFor(actor, (snapshot) => snapshot.matches("delivered"));
@@ -25,21 +25,19 @@ test("a run does not start until an operator event approves it", async () => {
     "commit",
     "checks",
     "secondPass",
-    "review",
+    "impacts",
     "publish",
-    "monitor",
-    "merge",
     "retrospective",
   ]);
   actor.stop();
 });
 
-test("returning to Planning cancels work and waits for resource drainage", async () => {
+test("stopping cancels work and waits for resource drainage", async () => {
   const signals: AbortSignal[] = [];
   const work = Promise.withResolvers<void>();
   const drain = Promise.withResolvers<void>();
   const stages: string[] = [];
-  const actor = createWorkflow({
+  const actor = createJourney({
     execute: async (stage, current, signal) => {
       stages.push(stage);
       if (stage === "work") {
@@ -53,14 +51,14 @@ test("returning to Planning cancels work and waits for resource drainage", async
   }).start();
   actor.send({ type: "implementation.requested", run: run() });
   await waitFor(actor, (snapshot) => snapshot.matches("work"));
-  actor.send({ type: "planning.requested" });
+  actor.send({ type: "stop.requested" });
   assert.equal(actor.getSnapshot().value, "stopping");
   assert.equal(signals[0]?.aborted, true);
   work.resolve();
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(actor.getSnapshot().value, "stopping");
   drain.resolve();
-  await waitFor(actor, (snapshot) => snapshot.matches("planning"));
+  await waitFor(actor, (snapshot) => snapshot.matches("idle"));
   assert.deepEqual(stages, ["preflight", "work"]);
   actor.stop();
 });
@@ -69,7 +67,7 @@ test("the machine bounds repair cycles even when a worker keeps requesting repai
   const current = run();
   current.config.maxRepairRounds = 1;
   let repairs = 0;
-  const actor = createWorkflow({
+  const actor = createJourney({
     execute: async (stage, value): Promise<StepResult> => {
       if (stage === "checks") return { kind: "repair", run: value, reason: "check failed" };
       if (stage === "repair") repairs++;
@@ -87,7 +85,7 @@ test("the machine bounds repair cycles even when a worker keeps requesting repai
 
 test("recovered runs remain blocked until an explicit resume event", async () => {
   let executed = 0;
-  const actor = createWorkflow({
+  const actor = createJourney({
     execute: async (_stage, value) => {
       executed++;
       return { kind: "blocked", run: value, reason: "Missing capability" };

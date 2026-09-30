@@ -8,17 +8,11 @@ export function approvedPaths(run: Run): string[] {
     : (run.plan.units[run.unitIndex]?.paths ?? []);
 }
 
-export const PLANNING_FOOTER = "— We are in the Planning Phase";
-export const PLANNING_TOOLS = ["read", "grep", "find", "ls", "workflow_plan"];
+const READ_TOOLS = ["read", "grep", "find", "ls"];
 
-export function planningAdmission(name: string): { block: true; reason: string } | undefined {
-  if (PLANNING_TOOLS.includes(name)) return undefined;
-  return { block: true, reason: "Planning permits investigation and plan recording only" };
-}
-
-export function appendPlanningFooter(text: string): string {
-  const trimmed = text.trimEnd();
-  return trimmed.endsWith(PLANNING_FOOTER) ? trimmed : `${trimmed}\n\n${PLANNING_FOOTER}`;
+export function runAdmission(name: string): { block: true; reason: string } | undefined {
+  if (READ_TOOLS.includes(name)) return undefined;
+  return { block: true, reason: "An active run owns this repository; use /journey stop first" };
 }
 
 function inside(root: string, target: string): boolean {
@@ -28,7 +22,7 @@ function inside(root: string, target: string): boolean {
 
 function metadata(path: string): boolean {
   const normalized = path.toLowerCase();
-  return normalized.split(sep).includes(".git") || normalized === ".pi/mode-workflow.json";
+  return normalized.split(sep).includes(".git") || normalized === ".pi/journey.json";
 }
 
 export function canonicalRepoPath(path: string): string {

@@ -8,70 +8,46 @@ import { defaultConfig, makePlan, makeRun, type Review, type Run } from "../src/
 import { Delivery } from "../src/delivery.ts";
 import { hash } from "../src/files.ts";
 import { Journal } from "../src/journal.ts";
+import { createJourney } from "../src/journey.ts";
 import { OwnedResources } from "../src/runner.ts";
-import { createWorkflow } from "../src/workflow.ts";
 import { repository } from "./helpers.ts";
 
 const scenarios: readonly {
   deliveryMode: "single" | "stack";
   loseCreateResponse?: boolean;
-  mergeMode: "none" | "deny" | "race" | "land" | "retarget";
-  loseMergeResponse?: boolean;
   reviewDefect?: boolean;
   persistentDefect?: boolean;
   missingBranch?: boolean;
   missingNextBranch?: boolean;
   recoveryChange?: "head" | "remote";
-  stopPreparation?: boolean;
-  stopPropagation?: boolean;
-  lowerThread?: boolean;
-  changeOriginDuringLanding?: boolean;
-  missingRemoteConfig?: boolean;
+  closeLostPr?: boolean;
 }[] = [
-  { deliveryMode: "single", loseCreateResponse: false, mergeMode: "none" },
-  { deliveryMode: "stack", loseCreateResponse: false, mergeMode: "none" },
-  { deliveryMode: "single", loseCreateResponse: true, mergeMode: "none" },
-  { deliveryMode: "stack", loseCreateResponse: false, mergeMode: "deny" },
-  { deliveryMode: "single", loseCreateResponse: false, mergeMode: "race" },
-  { deliveryMode: "stack", loseCreateResponse: false, mergeMode: "land" },
-  { deliveryMode: "stack", mergeMode: "land", loseMergeResponse: true },
-  { deliveryMode: "single", mergeMode: "retarget" },
-  { deliveryMode: "single", mergeMode: "none", reviewDefect: true },
-  { deliveryMode: "single", mergeMode: "none", missingBranch: true },
-  { deliveryMode: "single", mergeMode: "none", recoveryChange: "head" },
-  { deliveryMode: "single", mergeMode: "none", recoveryChange: "remote" },
-  { deliveryMode: "stack", mergeMode: "land", stopPreparation: true },
-  { deliveryMode: "stack", mergeMode: "land", stopPropagation: true },
-  { deliveryMode: "stack", mergeMode: "none", missingNextBranch: true },
-  { deliveryMode: "single", mergeMode: "none", reviewDefect: true, persistentDefect: true },
-  { deliveryMode: "stack", mergeMode: "none", lowerThread: true },
-  { deliveryMode: "stack", mergeMode: "land", changeOriginDuringLanding: true },
-  { deliveryMode: "single", mergeMode: "none", missingRemoteConfig: true },
+  { deliveryMode: "single" },
+  { deliveryMode: "stack" },
+  { deliveryMode: "single", loseCreateResponse: true },
+  { deliveryMode: "single", reviewDefect: true },
+  { deliveryMode: "single", missingBranch: true },
+  { deliveryMode: "single", recoveryChange: "head" },
+  { deliveryMode: "single", recoveryChange: "remote" },
+  { deliveryMode: "stack", missingNextBranch: true },
+  { deliveryMode: "single", reviewDefect: true, persistentDefect: true },
+  { deliveryMode: "single", loseCreateResponse: true, closeLostPr: true },
 ];
 for (const {
   deliveryMode,
   loseCreateResponse = false,
-  mergeMode,
-  loseMergeResponse = false,
   reviewDefect = false,
   persistentDefect = false,
   missingBranch = false,
   missingNextBranch = false,
   recoveryChange,
-  stopPreparation = false,
-  stopPropagation = false,
-  lowerThread = false,
-  changeOriginDuringLanding = false,
-  missingRemoteConfig = false,
+  closeLostPr = false,
 } of scenarios) {
-  test(`full ${deliveryMode}, merge=${mergeMode}, lost create=${loseCreateResponse}, lost merge=${loseMergeResponse}, repair=${reviewDefect}, exhausted=${persistentDefect}, missing branch=${missingBranch || missingNextBranch}, changed=${recoveryChange}, prepare interruption=${stopPreparation}, propagation interruption=${stopPropagation}, lower thread=${lowerThread}, active remote change=${changeOriginDuringLanding}`, async () => {
+  test(`full ${deliveryMode}, lost create=${loseCreateResponse}, repair=${reviewDefect}, exhausted=${persistentDefect}, missing branch=${missingBranch || missingNextBranch}, changed=${recoveryChange}, closed PR=${closeLostPr}`, async () => {
     const fixture = await repository();
     const originalPath = process.env.PATH;
     class InterruptedBranch extends OwnedResources {
       interrupted = false;
-      stoppedPreparation = false;
-      stoppedPropagation = false;
-      changedOrigin = false;
       override command(...args: Parameters<OwnedResources["command"]>) {
         if (
           (missingBranch || (missingNextBranch && journal.current()?.unitIndex === 1)) &&
@@ -87,77 +63,12 @@ for (const {
             stderr: "Interrupted before branch creation",
           });
         }
-        const saved = journal.current();
-        if (
-          changeOriginDuringLanding &&
-          !this.changedOrigin &&
-          args[0][0] === "git" &&
-          args[0][1] === "fetch" &&
-          saved?.resumeStage === "prepare"
-        ) {
-          this.changedOrigin = true;
-          const fork = join(journal.directory, "fork.git");
-          execFileSync("git", ["clone", "--bare", bare, fork], { stdio: "ignore" });
-          const forkGit = (...argv: string[]) =>
-            execFileSync("git", ["--git-dir", fork, ...argv], {
-              encoding: "utf8",
-              env: {
-                ...process.env,
-                GIT_AUTHOR_NAME: "Fixture",
-                GIT_AUTHOR_EMAIL: "fixture@example.invalid",
-                GIT_COMMITTER_NAME: "Fixture",
-                GIT_COMMITTER_EMAIL: "fixture@example.invalid",
-              },
-            }).trim();
-          const parent = forkGit("rev-parse", "main");
-          const blob = execFileSync("git", ["--git-dir", fork, "hash-object", "-w", "--stdin"], {
-            input: "Foreign fork content",
-            encoding: "utf8",
-          }).trim();
-          forkGit("read-tree", parent);
-          forkGit("update-index", "--add", "--cacheinfo", "100644", blob, "foreign");
-          const tree = forkGit("write-tree");
-          const commit = forkGit("commit-tree", tree, "-p", parent, "-m", "Foreign fork base");
-          forkGit("update-ref", "refs/heads/main", commit, parent);
-          execFileSync("git", ["-C", fixture.root, "remote", "set-url", "origin", fork]);
-        }
-        if (
-          stopPropagation &&
-          !this.stoppedPropagation &&
-          saved !== null &&
-          args[0][0] === "git" &&
-          args[0][1] === "checkout" &&
-          args[0][2] === saved?.units[1]?.branch &&
-          saved.operations.at(-1)?.detail === "propagate ancestor" &&
-          saved.operations.at(-1)?.state === "confirmed"
-        ) {
-          this.stoppedPropagation = true;
-          return Promise.resolve({
-            code: 1,
-            stdout: "",
-            stderr: "Stopped after propagation receipt",
-          });
-        }
-        if (
-          stopPreparation &&
-          !this.stoppedPreparation &&
-          args[0][0] === "git" &&
-          args[0][1] === "fetch" &&
-          journal.current()?.resumeStage === "prepare"
-        ) {
-          this.stoppedPreparation = true;
-          return Promise.resolve({
-            code: 1,
-            stdout: "",
-            stderr: "Interrupted after ancestor merge before descendant preparation",
-          });
-        }
         return super.command(...args);
       }
     }
     const resources = new InterruptedBranch();
     const journal = new Journal(fixture.root);
-    let actor: ReturnType<typeof createWorkflow> | undefined;
+    let actor: ReturnType<typeof createJourney> | undefined;
     const bare = join(journal.directory, "fixture-remote.git");
     const statePath = join(journal.directory, "github-state.json");
     try {
@@ -188,10 +99,6 @@ for (const {
           prs: [],
           commands: [],
           loseCreateResponse,
-          mergeMode,
-          loseMergeResponse,
-          lowerThread,
-          threadResolved: false,
         }),
       );
       const simulator = `#!${process.execPath}
@@ -200,26 +107,12 @@ const args=process.argv.slice(2);const file=${JSON.stringify(statePath)};const b
 const state=JSON.parse(fs.readFileSync(file,'utf8'));state.commands.push(args);
 const option=(name)=>args[args.indexOf(name)+1];
 const oid=(branch)=>execFileSync('git',['--git-dir',bare,'rev-parse','refs/heads/'+branch],{encoding:'utf8'}).trim();
-const view=(pr)=>({...pr,headRefOid:oid(pr.headRefName),baseRefOid:oid(pr.baseRefName),state:pr.state||'OPEN',isDraft:false,
-mergeable:'MERGEABLE',mergeStateStatus:'CLEAN',reviewDecision:'APPROVED',statusCheckRollup:[{__typename:'CheckRun',name:'verify',status:'COMPLETED',conclusion:'SUCCESS'}]});
-const git=(args,input)=>execFileSync('git',['--git-dir',bare,...args],{encoding:'utf8',input,env:{...process.env,GIT_AUTHOR_NAME:'Fixture',GIT_COMMITTER_NAME:'Fixture',GIT_AUTHOR_EMAIL:'fixture@example.invalid',GIT_COMMITTER_EMAIL:'fixture@example.invalid'}}).trim();
+const view=(pr)=>({...pr,state:pr.state||'OPEN',headRefOid:oid(pr.headRefName)});
 let result={};
 if(args[0]==='repo')result={nameWithOwner:args[2].replace('https://github.com/','').replace(/\\.git$/,'')};
 else if(args[0]==='pr'&&args[1]==='list')result=state.prs.filter(pr=>pr.headRefName===option('--head')).map(pr=>({number:pr.number}));
 else if(args[0]==='pr'&&args[1]==='create'){const number=state.prs.length+1;state.prs.push({number,url:'https://github.com/fixture/repository/pull/'+number,headRefName:option('--head'),baseRefName:option('--base')});result='created';}
 else if(args[0]==='pr'&&args[1]==='view'){const pr=state.prs.find(pr=>pr.number===Number(args[2]));if(!pr)process.exit(1);result=view(pr);}
-else if(args[0]==='pr'&&args[1]==='edit'){const pr=state.prs.find(pr=>pr.number===Number(args[2]));pr.baseRefName=option('--base');result='retargeted';}
-else if(args[0]==='pr'&&args[1]==='merge'){
-const pr=state.prs.find(pr=>pr.number===Number(args[2]));const expected=option('--match-head-commit');
-if(!args.includes('--merge')||!args.includes('--match-head-commit')||expected!==oid(pr.headRefName))process.exit(3);
-if(state.mergeMode==='race'){const old=oid(pr.headRefName);const tree=git(['rev-parse',old+'^{tree}']);const changed=git(['commit-tree',tree,'-p',old],'External head change');git(['update-ref','refs/heads/'+pr.headRefName,changed,old]);fs.writeFileSync(file,JSON.stringify(state));process.stderr.write('Expected head changed atomically; merge denied');process.exit(1);}
-const base=oid(pr.baseRefName);const head=oid(pr.headRefName);const tree=git(['rev-parse',head+'^{tree}']);const merged=git(['commit-tree',tree,'-p',base,'-p',head],'Fixture server merge');git(['update-ref','refs/heads/'+pr.baseRefName,merged,base]);pr.state='MERGED';result='merged';
-if(state.loseMergeResponse){state.loseMergeResponse=false;fs.writeFileSync(file,JSON.stringify(state));process.stderr.write('Server merged; response was lost');process.exit(1);}}
-else if(args[0]==='api'&&args[1].endsWith('/protection')){if(state.mergeMode==='deny'){fs.writeFileSync(file,JSON.stringify(state));process.stderr.write('Branch protection unavailable');process.exit(1);}if(state.mergeMode==='retarget'){git(['update-ref','refs/heads/other',oid('main')]);state.prs[0].baseRefName='other';}result={required_status_checks:{strict:true,contexts:['verify'],checks:[]},required_pull_request_reviews:{required_approving_review_count:1,dismiss_stale_reviews:true},enforce_admins:{enabled:true}};}
-else if(args[0]==='api'&&args[1]==='graphql'){
-if(args.some(arg=>arg.includes('resolveReviewThread'))){state.threadResolved=true;result={data:{resolveReviewThread:{thread:{id:'T0',isResolved:true}}}};}
-else {const number=Number(args.find(arg=>arg.startsWith('number='))?.split('=')[1]);const nodes=state.lowerThread&&number===1?[{id:'T0',isResolved:state.threadResolved,path:'src/unit-0.ts',line:1,comments:{nodes:[{body:'Export is missing',url:'https://github.com/fixture/repository/pull/1#discussion_r1'}]}}]:[];
-result={data:{repository:{pullRequest:{autoMergeRequest:null,mergeQueueEntry:null,reviewThreads:{pageInfo:{hasNextPage:false},nodes},reviews:{pageInfo:{hasPreviousPage:false},nodes:[]}}}}};}}
 else {process.stderr.write('Unsupported simulator operation '+JSON.stringify(args));process.exit(2);}
 if(args[0]==='pr'&&args[1]==='create'&&state.loseCreateResponse){state.loseCreateResponse=false;fs.writeFileSync(file,JSON.stringify(state));process.stderr.write('Server accepted PR; response was lost');process.exit(1);}
 fs.writeFileSync(file,JSON.stringify(state));process.stdout.write(typeof result==='string'?result:JSON.stringify(result));
@@ -233,14 +126,13 @@ fs.writeFileSync(file,JSON.stringify(state));process.stdout.write(typeof result=
         ...defaultConfig(),
         secondPassSkill: skill,
         retrospectiveSkill: skill,
-        requiredChecks: missingRemoteConfig ? [] : ["verify"],
         ...(persistentDefect ? { maxRepairRounds: 1 } : {}),
       };
       const plan = makePlan(
         {
           goal: "Add two independent exports",
           body: "CMO: exports are absent. FMO: add each export. Premortem: scope drift.",
-          units: (mergeMode === "land" ? [0, 1, 2] : [0, 1]).map((index) => ({
+          units: [0, 1].map((index) => ({
             title: `feat: add export ${index}`,
             paths: [`src/unit-${index}.ts`],
             commitMessage: `feat: add export ${index}`,
@@ -257,7 +149,7 @@ fs.writeFileSync(file,JSON.stringify(state));process.stdout.write(typeof result=
         },
         fixture.root,
       );
-      const record = makeRun(plan, config, { executeChecks: true, merge: mergeMode !== "none" });
+      const record = makeRun(plan, config);
       const originalBase = execFileSync("git", ["--git-dir", bare, "rev-parse", "main"], {
         encoding: "utf8",
       }).trim();
@@ -294,26 +186,6 @@ fs.writeFileSync(file,JSON.stringify(state));process.stdout.write(typeof result=
           return { kind: "complete" as const, summary: "Export added" };
         },
         audit: async (run: Run, task: string) => {
-          if (task.startsWith("Read-only source triage")) {
-            assert.equal(
-              await readFile(join(fixture.root, "src/unit-0.ts"), "utf8"),
-              "export const unit0 = 0;\n",
-            );
-            return {
-              ...review(run),
-              findings: [
-                {
-                  id: "github:T0",
-                  priority: 2,
-                  path: "src/unit-0.ts",
-                  line: 1,
-                  detail: "Export is missing",
-                  disposition: "dismissed" as const,
-                  evidence: "src/unit-0.ts:1 contains the export",
-                },
-              ],
-            };
-          }
           if (task.startsWith("Read-only retrospective"))
             assert.equal(
               execFileSync("git", ["-C", fixture.root, "rev-parse", "HEAD"], {
@@ -352,7 +224,7 @@ fs.writeFileSync(file,JSON.stringify(state));process.stdout.write(typeof result=
         },
       };
       const delivery = new Delivery(fixture.root, journal, resources, workers, () => {});
-      actor = createWorkflow({
+      actor = createJourney({
         execute: (stage, run, signal) => delivery.execute(stage, run, signal),
         save: (run, phase) => journal.checkpoint(run, phase),
         drain: async (outcome) => {
@@ -371,20 +243,13 @@ fs.writeFileSync(file,JSON.stringify(state));process.stdout.write(typeof result=
         (snapshot) => snapshot.matches("delivered") || snapshot.matches("blocked"),
         { timeout: 90_000 },
       );
-      if (missingRemoteConfig) {
-        assert.equal(final.value, "blocked");
-        assert.match(final.context.reason, /Configure requiredChecks or requiredReviewers/);
-        assert.equal(writeAttempts, 0);
-        assert.deepEqual(JSON.parse(await readFile(statePath, "utf8")).prs, []);
-        return;
-      }
       if (persistentDefect) {
         assert.equal(final.value, "blocked");
         assert.equal(final.context.reason, "Repair budget exhausted");
         assert.equal(writeAttempts, 2);
         const recovered = journal.current();
         assert.ok(recovered);
-        assert.equal(recovered.resumeStage, "review");
+        assert.equal(recovered.resumeStage, "impacts");
         resources.reset();
         actor.send({ type: "run.resumed", run: recovered, acceptRecoveredEdits: false });
         final = await waitFor(actor, (snapshot) => snapshot.matches("blocked"), {
@@ -435,33 +300,26 @@ fs.writeFileSync(file,JSON.stringify(state));process.stdout.write(typeof result=
           );
         return;
       }
-      if (
-        loseCreateResponse ||
-        loseMergeResponse ||
-        missingBranch ||
-        missingNextBranch ||
-        stopPreparation ||
-        stopPropagation
-      ) {
+      if (loseCreateResponse || missingBranch || missingNextBranch) {
         assert.equal(final.value, "blocked");
         const recovered = journal.current();
         assert.ok(recovered);
-        assert.equal(
-          recovered.operations.at(-1)?.state,
-          stopPreparation || stopPropagation ? "confirmed" : "uncertain",
-        );
-        if (stopPreparation) assert.equal(recovered.resumeStage, "prepare");
-        if (stopPropagation) {
-          assert.equal(recovered.unitIndex, 1, "the causal unit survives descendant effects");
-          assert.equal(
-            recovered.operations.at(-1)?.unit,
-            2,
-            "the effect names its descendant target",
-          );
-          assert.equal(recovered.resumeStage, "prepare");
-          assert.equal(recovered.units[1]?.merged, false);
-        }
+        assert.equal(recovered.operations.at(-1)?.state, "uncertain");
         if (missingNextBranch) assert.equal(recovered.resumeStage, "work");
+        if (closeLostPr) {
+          const remote = JSON.parse(await readFile(statePath, "utf8"));
+          remote.prs[0].state = "CLOSED";
+          await writeFile(statePath, JSON.stringify(remote));
+          resources.reset();
+          actor.send({ type: "run.resumed", run: recovered, acceptRecoveredEdits: false });
+          final = await waitFor(actor, (snapshot) => snapshot.matches("blocked"), {
+            timeout: 90_000,
+          });
+          assert.match(final.context.reason, /PR #1 is closed .* expected an open PR on main/);
+          const after = JSON.parse(await readFile(statePath, "utf8"));
+          assert.equal(after.prs.length, 1, "recovery never opens a replacement PR");
+          return;
+        }
         resources.reset();
         actor.send({ type: "run.resumed", run: recovered, acceptRecoveredEdits: false });
         final = await waitFor(
@@ -470,56 +328,31 @@ fs.writeFileSync(file,JSON.stringify(state));process.stdout.write(typeof result=
           { timeout: 90_000 },
         );
       }
-      const blocked = mergeMode === "deny" || mergeMode === "race" || mergeMode === "retarget";
-      assert.equal(final.value, blocked ? "blocked" : "delivered", final.context.reason);
-      assert.deepEqual(
-        writes,
-        mergeMode === "land" ? [0, 1, 2] : reviewDefect ? [0, 0, 1] : [0, 1],
-      );
-      assert.equal(reviews.length, mergeMode === "land" ? 6 : reviewDefect ? 3 : 2);
-      if (blocked) {
-        actor.send({ type: "planning.requested" });
-        await waitFor(actor, (snapshot) => snapshot.matches("planning"));
-      }
+      assert.equal(final.value, "delivered", final.context.reason);
+      assert.deepEqual(writes, reviewDefect ? [0, 0, 1] : [0, 1]);
+      assert.equal(reviews.length, reviewDefect ? 3 : 2);
       assert.equal(journal.owned, false);
       const saved = journal.current();
       assert.ok(saved);
-      assert.equal(saved.checkpoint, blocked ? "planning" : "delivered");
-      if (mergeMode !== "race")
-        assert.ok(saved.operations.every((operation) => operation.state === "confirmed"));
+      assert.equal(saved.checkpoint, "delivered");
+      assert.ok(saved.operations.every((operation) => operation.state === "confirmed"));
       const remote: {
         prs: { number: number; baseRefName: string; headRefName: string }[];
         commands: string[][];
       } = JSON.parse(await readFile(statePath, "utf8"));
-      assert.equal(remote.prs.length, deliveryMode === "single" ? 1 : mergeMode === "land" ? 3 : 2);
+      assert.equal(remote.prs.length, deliveryMode === "single" ? 1 : 2);
       assert.equal(
         remote.commands.filter((args) => args[0] === "pr" && args[1] === "create").length,
         remote.prs.length,
       );
-      assert.equal(remote.prs[0]?.baseRefName, mergeMode === "retarget" ? "other" : "main");
-      if (deliveryMode === "stack" && mergeMode !== "land")
+      assert.equal(remote.prs[0]?.baseRefName, "main");
+      if (deliveryMode === "stack")
         assert.equal(remote.prs[1]?.baseRefName, saved.units[0]?.branch);
-      const mergeCalls = remote.commands.filter((args) => args[0] === "pr" && args[1] === "merge");
-      assert.equal(mergeCalls.length, mergeMode === "land" ? 3 : mergeMode === "race" ? 1 : 0);
-      for (const call of mergeCalls) assert.ok(call.includes("--match-head-commit"));
-      if (mergeMode === "land") {
-        assert.ok(saved.units.every((unit) => unit.merged));
-        assert.deepEqual(
-          mergeCalls.map((call) => call[2]),
-          ["1", "2", "3"],
-        );
-        assert.ok(
-          execFileSync("git", ["--git-dir", bare, "ls-tree", "-r", "--name-only", "main"], {
-            encoding: "utf8",
-          }).includes("src/unit-2.ts"),
-        );
-      } else
-        assert.equal(
-          execFileSync("git", ["--git-dir", bare, "rev-parse", "main"], {
-            encoding: "utf8",
-          }).trim(),
-          originalBase,
-        );
+      assert.equal(
+        execFileSync("git", ["--git-dir", bare, "rev-parse", "main"], { encoding: "utf8" }).trim(),
+        originalBase,
+        "delivery leaves the base branch unmerged",
+      );
       for (const pr of remote.prs) {
         const tree = execFileSync(
           "git",
@@ -527,11 +360,8 @@ fs.writeFileSync(file,JSON.stringify(state));process.stdout.write(typeof result=
           { encoding: "utf8" },
         );
         assert.ok(tree.includes("src/unit-0.ts"));
-        if (changeOriginDuringLanding) assert.ok(!tree.split("\n").includes("foreign"));
         if (pr === remote.prs.at(-1)) assert.ok(tree.includes("src/unit-1.ts"));
       }
-      if (lowerThread)
-        assert.equal(JSON.parse(await readFile(statePath, "utf8")).threadResolved, true);
     } finally {
       process.env.PATH = originalPath;
       actor?.stop();

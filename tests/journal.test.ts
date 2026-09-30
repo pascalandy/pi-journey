@@ -18,8 +18,8 @@ test("two coordinators cannot own the same repository and ownership releases aft
     assert.deepEqual(first.current(), record);
     await first.release();
     await second.acquire(record.id);
-    second.checkpoint(record, "review");
-    assert.equal(second.current()?.checkpoint, "review");
+    second.checkpoint(record, "impacts");
+    assert.equal(second.current()?.checkpoint, "impacts");
   } finally {
     await first.release();
     await second.release();
@@ -49,10 +49,6 @@ test("a phase checkpoint preserves a prepared external intent from the durable j
     });
     journal.checkpoint(record, "blocked");
     assert.equal(journal.current()?.operations[0]?.state, "prepared");
-    assert.throws(
-      () => parseRun({ ...record, grant: { ...record.grant, planDigest: "different" } }),
-      /stale/,
-    );
     assert.throws(() => parseRun({ ...record, unitIndex: 3 }), /inconsistent/);
   } finally {
     await journal.release();
@@ -68,7 +64,7 @@ test("a missing active record cannot be mistaken for permission to start a new r
     await journal.acquire(record.id);
     journal.write(record);
     await unlink(join(journal.directory, "runs", `${record.id}.json`));
-    assert.throws(() => journal.current(), /Active workflow record is missing/);
+    assert.throws(() => journal.current(), /Active journey record is missing/);
   } finally {
     await journal.release();
     await fixture.cleanup();

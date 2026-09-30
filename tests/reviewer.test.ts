@@ -28,14 +28,16 @@ for (const outcome of ["pass", "model", "empty", "malformed", "stale"] as const)
         executable,
         `#!${process.execPath}
 import assert from 'node:assert/strict';import fs from 'node:fs';
-const argv=process.argv.slice(2);assert.equal(argv[argv.indexOf('--sandbox')+1],'read-only');assert.equal(argv[argv.indexOf('-m')+1],'gpt-6-astra');
-      process.stderr.write(${JSON.stringify(`OpenAI Codex TEST\n--------\nmodel: ${outcome === "model" ? "another-model" : "gpt-6-astra"}\nsandbox: read-only\napproval: never\nreasoning effort: high\n--------\n`)});
+const argv=process.argv.slice(2);assert.equal(argv[argv.indexOf('--sandbox')+1],'read-only');assert.equal(argv[argv.indexOf('-m')+1],'gpt-6.1-sol');
+      process.stderr.write(${JSON.stringify(`OpenAI Codex TEST\n--------\nmodel: ${outcome === "model" ? "another-model" : "gpt-6.1-sol"}\nsandbox: read-only\napproval: never\nreasoning effort: xhigh\n--------\n`)});
 fs.writeFileSync(argv[argv.indexOf('-o')+1],${JSON.stringify(outcome === "empty" ? "" : outcome === "malformed" ? "{}" : JSON.stringify(result))});
 `,
       );
       await chmod(executable, 0o700);
       const record = run(fixture.root);
       record.config.reviewerBinary = executable;
+      record.config.impactsSkill = join(journal.directory, "blast-radius.md");
+      await writeFile(record.config.impactsSkill, "Name every caller the change touches");
       const worker = new Workers(fixture.root, journal, resources, () => {
         throw new Error("Review must not use the writer model");
       });

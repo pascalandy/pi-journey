@@ -1,9 +1,9 @@
 packages:
   - .
-ignoredBuiltDependencies:
-  - "@google/genai"
-  - esbuild
-  - protobufjs
+allowBuilds:
+  "@google/genai": false
+  esbuild: false
+  protobufjs: false
 minimumReleaseAgeExclude:
   - "@earendil-works/chord@0.99.1"
   - "@earendil-works/pi-agent-core@0.99.1"

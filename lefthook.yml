@@ -1,0 +1,20 @@
+# Run `just install` once per clone. Docs: https://lefthook.dev
+# Silent on success; a failing job replays its output
+output:
+  - failure
+
+pre-commit:
+  jobs:
+    - name: gitleaks
+      run: just gitleaks-staged
+      fail_text: "A secret is staged, or gitleaks is missing (brew install gitleaks)"
+
+    - name: lint
+      glob: "*.{js,mjs,ts,mts}"
+      run: just lint {staged_files}
+      fail_text: "Biome found problems; run: pnpm exec biome check --write <file>"
+
+pre-push:
+  jobs:
+    - name: check
+      run: just check

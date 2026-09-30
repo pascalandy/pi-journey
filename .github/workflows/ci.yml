@@ -1,25 +1,37 @@
-name: Verify
+name: CI
+
+# Manual only: `just signoff` is the PR gate. Start a run on a pushed ref with
+# `gh workflow run ci.yml --ref <branch>`, then `gh run watch`
 on:
-  pull_request:
-  push:
-    branches: [main]
+  workflow_dispatch:
+
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.ref }}
+
 jobs:
-  verify:
-    name: verify (${{ matrix.os }})
+  check:
+    name: check (${{ matrix.os }})
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      JUST_VERSION: "1.50.0"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: "24"
           cache: pnpm
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.19"
       - run: pnpm install --frozen-lockfile
-      - run: pnpm run check
-      - run: pnpm run build
-      - run: pnpm run verify
+      - run: uvx --from "rust-just@$JUST_VERSION" just check

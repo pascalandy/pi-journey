@@ -16,7 +16,7 @@ import { hostname } from "node:os";
 import { join, resolve } from "node:path";
 import lockfile from "proper-lockfile";
 import { Type } from "typebox";
-import { parse, parseRun, type Run, StageSchema } from "./contracts.ts";
+import { isStage, parse, parseRun, type Run } from "./contracts.ts";
 
 const OwnerSchema = Type.Object(
   {
@@ -73,7 +73,7 @@ export class Journal {
         env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
       },
     ).trim();
-    this.directory = resolve(gitDirectory, "pi-mode-workflow");
+    this.directory = resolve(gitDirectory, "pi-journey");
   }
 
   get owned(): boolean {
@@ -142,7 +142,7 @@ export class Journal {
     this.assertOwned(run.id);
     parseRun(run);
     if (run.plan.repository !== this.repository)
-      throw new Error("Workflow repository identity changed");
+      throw new Error("Journey repository identity changed");
     atomic(join(this.directory, "runs", `${run.id}.json`), run);
     atomic(join(this.directory, "active.json"), { id: run.id });
   }
@@ -153,21 +153,7 @@ export class Journal {
     this.write({
       ...latest,
       checkpoint: phase,
-      resumeStage: [
-        "work",
-        "commit",
-        "checks",
-        "secondPass",
-        "review",
-        "repair",
-        "publish",
-        "monitor",
-        "merge",
-        "prepare",
-        "retrospective",
-      ].includes(phase)
-        ? parse(StageSchema, phase, "resume stage")
-        : latest.resumeStage,
+      resumeStage: isStage(phase) && phase !== "preflight" ? phase : latest.resumeStage,
       repairRounds: run.repairRounds,
       repairReason: run.repairReason,
       acceptRecoveredEdits: run.acceptRecoveredEdits,
@@ -180,7 +166,7 @@ export class Journal {
     if (!existsSync(path)) return null;
     const run = parseRun(JSON.parse(readFileSync(path, "utf8")));
     if (run.id !== id || run.plan.repository !== this.repository) {
-      throw new Error("Workflow journal identity changed");
+      throw new Error("Journey journal identity changed");
     }
     return run;
   }
@@ -195,10 +181,13 @@ export class Journal {
     );
     const run = this.read(pointer.id);
     if (run === null)
-      throw new Error(
-        "Active workflow record is missing; reconcile it before starting another run",
-      );
+      throw new Error("Active journey record is missing; reconcile it before starting another run");
     return run;
+  }
+
+  unfinished(): Run | null {
+    const run = this.current();
+    return run && !["delivered", "retired"].includes(run.checkpoint) ? run : null;
   }
 
   async release(): Promise<void> {

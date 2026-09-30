@@ -1,18 +1,18 @@
 {
-  "name": "@pascalandy/pi-mode-workflow",
+  "name": "@pascalandy/pi-journey",
   "version": "0.1.0",
-  "description": "Planning and XState-owned implementation workflows for Pi",
+  "description": "Operator-started journeys for Pi, owned by one XState coordinator",
   "type": "module",
   "license": "MIT",
   "packageManager": "pnpm@12.8.1",
   "engines": { "node": ">=24" },
   "pi": { "extensions": ["src/index.ts"] },
-  "files": ["src", "prompts", "README.md", "LICENSE"],
+  "files": ["src", "README.md", "LICENSE"],
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "lint": "biome check src tests scripts",
-    "check": "pnpm run typecheck && pnpm run test && pnpm run lint && node scripts/plan-prompt.mjs --check",
+    "check": "pnpm run typecheck && pnpm run test && pnpm run lint",
     "build": "tsc -p tsconfig.build.json",
     "verify": "node --experimental-strip-types scripts/verify.ts"
   },
@@ -22,17 +22,15 @@
     "xstate": "5.32.5"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=0.99.1 <1",
-    "@earendil-works/pi-tui": ">=0.99.1 <1"
+    "@earendil-works/pi-coding-agent": ">=0.99.1 <1"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.15",
     "@earendil-works/pi-coding-agent": "0.99.1",
-    "@earendil-works/pi-tui": "0.99.1",
     "@types/node": "24.13.3",
     "@types/proper-lockfile": "4.1.4",
     "typescript": "6.0.3"
   },
-  "keywords": ["pi-package", "pi-extension", "xstate", "workflow", "planning"],
-  "repository": { "type": "git", "url": "git+https://github.com/pascalandy/pi-mode-workflow.git" }
+  "keywords": ["pi-package", "pi-extension", "xstate", "journey"],
+  "repository": { "type": "git", "url": "git+https://github.com/pascalandy/pi-journey.git" }
 }

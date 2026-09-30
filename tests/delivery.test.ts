@@ -1,17 +1,125 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
-import { defaultConfig, evidence, makePlan, makeRun, type Review } from "../src/contracts.ts";
+import { evidence, makePlan, type Review, type Run } from "../src/contracts.ts";
 import { acceptReview, Delivery, deliveryTargets } from "../src/delivery.ts";
-import { fileHash, hash } from "../src/files.ts";
-import { checksReady, type PullRequest, reviewersReady, type Threads } from "../src/github.ts";
+import { fileHash, hash, writeOwnedFile } from "../src/files.ts";
 import { Journal } from "../src/journal.ts";
 import { OwnedResources } from "../src/runner.ts";
 import { repository, run } from "./helpers.ts";
 
 const head = "a".repeat(40);
+
+for (const interruption of ["before-write", "after-write", "consecutive"] as const) {
+  test(`recovery admits only attributable content after ${interruption} interruption`, async () => {
+    const fixture = await repository();
+    let crash: "prepared" | "confirmed" | undefined;
+    const journal = new (class extends Journal {
+      override write(record: Run) {
+        const state = record.edits.at(-1)?.state;
+        if (crash === "confirmed" && state === crash) {
+          crash = undefined;
+          throw new Error("Interrupted before confirmation");
+        }
+        super.write(record);
+        if (crash === "prepared" && state === crash) {
+          crash = undefined;
+          throw new Error("Interrupted before file write");
+        }
+      }
+    })(fixture.root);
+    const resources = new (class extends OwnedResources {
+      override command(...args: Parameters<OwnedResources["command"]>) {
+        if (args[0][0] === "gh") {
+          assert.deepEqual(args[0], [
+            "gh",
+            "repo",
+            "view",
+            "https://github.com/fixture/repository.git",
+            "--json",
+            "nameWithOwner",
+          ]);
+          return Promise.resolve({
+            code: 0,
+            stdout: '{"nameWithOwner":"fixture/repository"}',
+            stderr: "",
+          });
+        }
+        return super.command(...args);
+      }
+    })();
+    try {
+      const record = run(fixture.root);
+      const unit = record.units[0];
+      assert.ok(unit);
+      execFileSync("git", ["-C", fixture.root, "checkout", "-b", unit.branch], { stdio: "ignore" });
+      execFileSync("git", [
+        "-C",
+        fixture.root,
+        "remote",
+        "add",
+        "origin",
+        "https://github.com/fixture/repository.git",
+      ]);
+      record.startHead = execFileSync("git", ["-C", fixture.root, "rev-parse", "HEAD"], {
+        encoding: "utf8",
+      }).trim();
+      unit.baseHead = record.startHead;
+      record.acceptRecoveredEdits = true;
+      await journal.acquire(record.id);
+      journal.write(record);
+      const signal = new AbortController().signal;
+      const path = "src/value.ts";
+      const write = (content: string) =>
+        writeOwnedFile(record, journal, resources, path, content, signal);
+      await write("Owned B\n");
+      crash = interruption === "before-write" ? "prepared" : "confirmed";
+      await assert.rejects(write("Owned C\n"), /Interrupted before/);
+      if (interruption === "consecutive") {
+        crash = "prepared";
+        await assert.rejects(write("Owned D\n"), /Interrupted before file write/);
+      }
+      const content = interruption === "before-write" ? "Owned B\n" : "Owned C\n";
+      assert.equal(await readFile(join(fixture.root, path), "utf8"), content);
+      const unavailable = async (): Promise<never> => {
+        throw new Error("Unexpected worker invocation");
+      };
+      const delivery = new Delivery(
+        fixture.root,
+        journal,
+        resources,
+        {
+          preflight: async () => {},
+          write: unavailable,
+          audit: unavailable,
+          review: unavailable,
+        },
+        () => {},
+      );
+      const result = await delivery.execute("preflight", record, signal);
+      assert.equal(result.kind, "passed");
+      assert.equal(await readFile(join(fixture.root, path), "utf8"), content);
+      if (interruption === "consecutive") {
+        await writeFile(join(fixture.root, path), "Owned B\n");
+        await assert.rejects(
+          delivery.execute("preflight", record, signal),
+          /Unattributed repository change/,
+        );
+        await assert.rejects(write("Replacement\n"), /External change/);
+        assert.equal(await readFile(join(fixture.root, path), "utf8"), "Owned B\n");
+        await writeFile(join(fixture.root, path), content);
+      }
+      await write("Recovered\n");
+      assert.equal(await readFile(join(fixture.root, path), "utf8"), "Recovered\n");
+    } finally {
+      await resources.drain();
+      await journal.release();
+      await fixture.cleanup();
+    }
+  });
+}
 
 test("review verdict cannot erase old unresolved findings or certify another head", () => {
   const record = run();
@@ -34,13 +142,13 @@ test("review verdict cannot erase old unresolved findings or certify another hea
       },
     ],
   };
-  assert.equal(acceptReview(record, review, "review").kind, "repair");
+  assert.equal(acceptReview(record, review, "impacts").kind, "repair");
   assert.equal(
-    acceptReview(record, { ...review, verdict: "pass", findings: [] }, "review").kind,
+    acceptReview(record, { ...review, verdict: "pass", findings: [] }, "impacts").kind,
     "repair",
   );
   assert.equal(
-    acceptReview(record, { ...review, verdict: "pass", reviewedHead: "b".repeat(40) }, "review")
+    acceptReview(record, { ...review, verdict: "pass", reviewedHead: "b".repeat(40) }, "impacts")
       .kind,
     "blocked",
   );
@@ -56,7 +164,7 @@ test("review verdict cannot erase old unresolved findings or certify another hea
           evidence: "src/file.ts:1 now uses the current value",
         })),
       },
-      "review",
+      "impacts",
     ).kind,
     "passed",
   );
@@ -70,45 +178,6 @@ test("delivery selects only the final cumulative PR or every ordered stack layer
   assert.deepEqual(deliveryTargets(record), [1]);
   record.plan.delivery = "stack";
   assert.deepEqual(deliveryTargets(record), [0, 1]);
-});
-
-test("remote checks and named approvals must be successful at the current head", () => {
-  const pr: PullRequest = {
-    number: 1,
-    url: "https://github.com/example/repo/pull/1",
-    headRefOid: head,
-    baseRefOid: "b".repeat(40),
-    headRefName: "feature",
-    baseRefName: "main",
-    state: "OPEN",
-    isDraft: false,
-    mergeable: "MERGEABLE",
-    mergeStateStatus: "CLEAN",
-    reviewDecision: "APPROVED",
-    statusCheckRollup: [
-      { __typename: "CheckRun", name: "verify", status: "COMPLETED", conclusion: "SUCCESS" },
-    ],
-  };
-  assert.equal(checksReady(pr, ["verify"]), true);
-  assert.equal(checksReady(pr, ["missing"]), false);
-  assert.equal(
-    checksReady(
-      { ...pr, statusCheckRollup: [{ __typename: "CheckRun", name: "verify", status: "QUEUED" }] },
-      ["verify"],
-    ),
-    false,
-  );
-  const threads: Threads = {
-    autoMergeRequest: null,
-    mergeQueueEntry: null,
-    reviewThreads: { pageInfo: { hasNextPage: false }, nodes: [] },
-    reviews: {
-      pageInfo: { hasPreviousPage: false },
-      nodes: [{ author: { login: "reviewer" }, state: "APPROVED", commit: { oid: head } }],
-    },
-  };
-  assert.equal(reviewersReady(threads, head, ["reviewer"]), true);
-  assert.equal(reviewersReady(threads, "b".repeat(40), ["reviewer"]), false);
 });
 
 test("checks certify a real committed tree and reject mutations created by the check", async () => {
@@ -149,7 +218,6 @@ test("checks certify a real committed tree and reject mutations created by the c
     // Direct stage invocation uses the journal's accepted plan, so install this new fixture before executing.
     const { makePlan } = await import("../src/contracts.ts");
     record.plan = makePlan(record.plan, fixture.root);
-    record.grant.planDigest = record.plan.digest;
     journal.write(record);
     await assert.rejects(
       delivery.execute("checks", record, new AbortController().signal),
@@ -187,7 +255,6 @@ test("coordinator commits attributable scoped edits and preserves unrelated file
       },
       fixture.root,
     );
-    record.grant.planDigest = record.plan.digest;
     await writeFile(join(fixture.root, "src/feature.ts"), "export const value = 1;\n");
     record.edits.push({
       unit: 0,
@@ -221,7 +288,7 @@ test("coordinator commits attributable scoped edits and preserves unrelated file
     execFileSync("git", ["-C", fixture.root, "checkout", "main"], { stdio: "ignore" });
     await assert.rejects(
       delivery.execute("commit", record, new AbortController().signal),
-      /Workflow branch changed/,
+      /Journey branch changed/,
     );
     assert.equal(
       execFileSync("git", ["-C", fixture.root, "rev-parse", "main"], {
@@ -265,127 +332,6 @@ test("coordinator commits attributable scoped edits and preserves unrelated file
       committedHead,
     );
     unit.checks = evidence(committedHead, true, "fixture");
-  } finally {
-    await resources.drain();
-    await journal.release();
-    await fixture.cleanup();
-  }
-});
-
-test("resuming a confirmed repair commit propagates it to existing descendants", async () => {
-  const fixture = await repository();
-  class InterruptedCommit extends OwnedResources {
-    interrupted = false;
-    override command(...args: Parameters<OwnedResources["command"]>) {
-      if (!this.interrupted && args[0][0] === "git" && args[0][1] === "diff-tree") {
-        this.interrupted = true;
-        return Promise.resolve({ code: 1, stdout: "", stderr: "Stopped after commit receipt" });
-      }
-      return super.command(...args);
-    }
-  }
-  const resources = new InterruptedCommit();
-  const journal = new Journal(fixture.root);
-  const git = (...args: string[]) =>
-    execFileSync("git", ["-C", fixture.root, ...args], {
-      encoding: "utf8",
-      stdio: ["pipe", "pipe", "pipe"],
-    }).trim();
-  try {
-    const plan = makePlan(
-      {
-        ...run(fixture.root).plan,
-        delivery: "stack",
-        units: [0, 1].map((index) => ({
-          title: `Unit ${index}`,
-          paths: [`src/unit-${index}.ts`],
-          commitMessage: `feat: unit ${index}`,
-        })),
-      },
-      fixture.root,
-    );
-    const record = makeRun(plan, defaultConfig(), { executeChecks: true, merge: false });
-    record.startHead = git("rev-parse", "HEAD");
-    await mkdir(join(fixture.root, "src"));
-    for (const [index, unit] of record.units.entries()) {
-      unit.baseHead = git("rev-parse", "HEAD");
-      git("checkout", "-b", unit.branch);
-      await writeFile(
-        join(fixture.root, `src/unit-${index}.ts`),
-        `export const value = ${index};\n`,
-      );
-      git("add", ".");
-      git("commit", "-m", `feat: initial unit ${index}`);
-      unit.head = git("rev-parse", "HEAD");
-      unit.checks = unit.secondPass = unit.review = evidence(unit.head, true, "Old evidence");
-    }
-    record.unitIndex = 0;
-    record.repairRounds = 1;
-    record.resumeStage = "commit";
-    const first = record.units[0];
-    assert.ok(first);
-    git("checkout", first.branch);
-    const content = "export const value = 42;\n";
-    await writeFile(join(fixture.root, "src/unit-0.ts"), content);
-    record.edits.push({
-      unit: 0,
-      path: "src/unit-0.ts",
-      beforeHash: hash("export const value = 0;\n"),
-      afterHash: hash(content),
-      state: "confirmed",
-    });
-    await journal.acquire(record.id);
-    journal.write(record);
-    const unavailable = async (): Promise<never> => {
-      throw new Error("Unexpected worker invocation");
-    };
-    const delivery = new Delivery(
-      fixture.root,
-      journal,
-      resources,
-      { write: unavailable, audit: unavailable, review: unavailable, preflight: unavailable },
-      () => {},
-    );
-    await assert.rejects(
-      delivery.execute("commit", record, new AbortController().signal),
-      /Stopped after commit receipt/,
-    );
-    const recovered = journal.current();
-    assert.ok(recovered);
-    assert.equal(recovered.operations.at(-1)?.state, "confirmed");
-    const repairHead = recovered.units[0]?.head;
-    const result = await delivery.execute("commit", recovered, new AbortController().signal);
-    assert.equal(result.kind, "passed");
-    const descendant = result.run.units[1];
-    assert.ok(descendant);
-    assert.equal(result.run.unitIndex, 0);
-    assert.equal(
-      result.run.units[0]?.head,
-      repairHead,
-      "recovery does not duplicate the repair commit",
-    );
-    assert.equal(descendant.baseHead, repairHead);
-    assert.equal(git("show", `${descendant.branch}:src/unit-0.ts`), "export const value = 42;");
-    assert.equal(git("show", `${descendant.branch}:src/unit-1.ts`), "export const value = 1;");
-    assert.equal(descendant.checks, null);
-    assert.equal(descendant.secondPass, null);
-    assert.equal(descendant.review, null);
-    assert.equal(result.run.operations.at(-1)?.unit, 1);
-    git("checkout", descendant.branch);
-    await writeFile(join(fixture.root, "external"), "Preserve unrelated descendant commit");
-    git("add", "external");
-    git("commit", "-m", "External descendant change");
-    const externalHead = git("rev-parse", "HEAD");
-    git("checkout", first.branch);
-    await assert.rejects(
-      delivery.execute("commit", result.run, new AbortController().signal),
-      /Committed tree changed/,
-    );
-    assert.equal(git("rev-parse", descendant.branch), externalHead);
-    assert.equal(
-      git("show", `${descendant.branch}:external`),
-      "Preserve unrelated descendant commit",
-    );
   } finally {
     await resources.drain();
     await journal.release();

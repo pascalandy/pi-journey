@@ -55,15 +55,14 @@ export const ConfigSchema = Type.Object(
   {
     baseBranch: text,
     secondPassSkill: text,
+    impactsSkill: text,
     retrospectiveSkill: text,
     reviewerBinary: text,
+    reviewerModel: Type.String({ pattern: "^[A-Za-z0-9._-]+$" }),
+    reviewerEffort: Type.String({ pattern: "^[a-z]+$" }),
     workerTimeoutMs: Type.Integer({ minimum: 1_000, maximum: 3_600_000 }),
     reviewerTimeoutMs: Type.Integer({ minimum: 1_000, maximum: 3_600_000 }),
     maxRepairRounds: Type.Integer({ minimum: 0, maximum: 10 }),
-    pollIntervalMs: Type.Integer({ minimum: 1_000, maximum: 300_000 }),
-    monitorTimeoutMs: Type.Integer({ minimum: 1_000, maximum: 3_600_000 }),
-    requiredChecks: Type.Array(text, { maxItems: 30 }),
-    requiredReviewers: Type.Array(text, { maxItems: 30 }),
   },
   closed,
 );
@@ -106,12 +105,9 @@ export const StageSchema = Type.Union([
   Type.Literal("commit"),
   Type.Literal("checks"),
   Type.Literal("secondPass"),
-  Type.Literal("review"),
+  Type.Literal("impacts"),
   Type.Literal("repair"),
   Type.Literal("publish"),
-  Type.Literal("monitor"),
-  Type.Literal("merge"),
-  Type.Literal("prepare"),
   Type.Literal("retrospective"),
 ]);
 
@@ -133,10 +129,9 @@ export const UnitSchema = Type.Object(
     head: Type.Union([sha, Type.Null()]),
     checks: Type.Union([EvidenceSchema, Type.Null()]),
     secondPass: Type.Union([EvidenceSchema, Type.Null()]),
-    review: Type.Union([EvidenceSchema, Type.Null()]),
+    impacts: Type.Union([EvidenceSchema, Type.Null()]),
     pr: Type.Union([Type.Integer({ minimum: 1 }), Type.Null()]),
     url: Type.Union([text, Type.Null()]),
-    merged: Type.Boolean(),
   },
   closed,
 );
@@ -149,9 +144,6 @@ export const OperationSchema = Type.Object(
       Type.Literal("commit"),
       Type.Literal("push"),
       Type.Literal("pr"),
-      Type.Literal("retarget"),
-      Type.Literal("merge"),
-      Type.Literal("resolve"),
     ]),
     unit: Type.Integer({ minimum: 0 }),
     expectedHead: Type.Union([sha, Type.Null()]),
@@ -171,15 +163,6 @@ export const RunSchema = Type.Object(
     id: uuid,
     plan: PlanSchema,
     config: ConfigSchema,
-    grant: Type.Object(
-      {
-        planDigest: text,
-        executeChecks: Type.Boolean(),
-        publish: Type.Boolean(),
-        merge: Type.Boolean(),
-      },
-      closed,
-    ),
     startHead: Type.Union([sha, Type.Null()]),
     remoteIdentity: Type.Union([text, Type.Null()]),
     originUrl: Type.Union([text, Type.Null()]),
@@ -218,6 +201,23 @@ export type Review = Static<typeof ReviewSchema>;
 export type WorkerResult = Static<typeof WorkerResultSchema>;
 export type Stage = Static<typeof StageSchema>;
 
+// The only copy of the stage order; the machine, resume, and checkpoints read it
+export const NEXT_STAGE = {
+  preflight: "work",
+  work: "commit",
+  commit: "checks",
+  checks: "secondPass",
+  secondPass: "impacts",
+  impacts: "publish",
+  repair: "commit",
+  publish: "retrospective",
+  retrospective: "finalizing",
+} as const satisfies Record<Stage, Stage | "finalizing">;
+
+export function isStage(value: string): value is Stage {
+  return Object.hasOwn(NEXT_STAGE, value);
+}
+
 export type StepResult =
   | { kind: "passed"; run: Run; next?: Exclude<Stage, "preflight"> }
   | { kind: "repair"; run: Run; reason: string }
@@ -232,15 +232,14 @@ export function defaultConfig(): Config {
   return {
     baseBranch: "main",
     secondPassSkill: join(homedir(), ".codex/skills/2nd-pass/SKILL.md"),
+    impactsSkill: join(homedir(), ".codex/skills/blast-radius/SKILL.md"),
     retrospectiveSkill: join(homedir(), ".codex/skills/pa-retro/SKILL.md"),
     reviewerBinary: "codex",
+    reviewerModel: "gpt-6.1-sol",
+    reviewerEffort: "xhigh",
     workerTimeoutMs: 900_000,
     reviewerTimeoutMs: 900_000,
     maxRepairRounds: 3,
-    pollIntervalMs: 10_000,
-    monitorTimeoutMs: 900_000,
-    requiredChecks: [],
-    requiredReviewers: [],
   };
 }
 
@@ -265,35 +264,39 @@ export function makePlan(input: PlanInput, repository: string): Plan {
   return { ...normalized, repository, id: randomUUID(), digest };
 }
 
-export function makeRun(
-  plan: Plan,
-  config: Config,
-  grant: { executeChecks: boolean; merge: boolean },
-): Run {
+// The operator approves exactly this list, so it is never truncated
+export function describeScope(plan: Plan): string {
+  return plan.units
+    .map(
+      (unit, index) =>
+        `${index + 1}. ${unit.title}\n   Writable: ${unit.paths.join(", ")}\n   Commit: ${unit.commitMessage}`,
+    )
+    .join("\n");
+}
+
+export function makeRun(plan: Plan, config: Config): Run {
   const id = randomUUID();
   return {
     version: 1,
     id,
     plan,
     config,
-    grant: { ...grant, publish: true, planDigest: plan.digest },
     startHead: null,
     remoteIdentity: null,
     originUrl: null,
     units: plan.units.map((_unit, index) => ({
-      branch: `workflow/${id.slice(0, 8)}${plan.delivery === "stack" ? `/${index + 1}` : ""}`,
+      branch: `journey/${id.slice(0, 8)}${plan.delivery === "stack" ? `/${index + 1}` : ""}`,
       baseBranch:
         plan.delivery === "stack" && index > 0
-          ? `workflow/${id.slice(0, 8)}/${index}`
+          ? `journey/${id.slice(0, 8)}/${index}`
           : config.baseBranch,
       baseHead: null,
       head: null,
       checks: null,
       secondPass: null,
-      review: null,
+      impacts: null,
       pr: null,
       url: null,
-      merged: false,
     })),
     unitIndex: 0,
     repairRounds: 0,
@@ -309,11 +312,10 @@ export function makeRun(
 }
 
 export function parseRun(value: unknown): Run {
-  const run = parse(RunSchema, value, "workflow record");
+  const run = parse(RunSchema, value, "journey record");
   if (run.units.length !== run.plan.units.length || run.unitIndex >= run.units.length) {
-    throw new Error("Workflow record has inconsistent units");
+    throw new Error("Journey record has inconsistent units");
   }
-  if (run.grant.planDigest !== run.plan.digest) throw new Error("Workflow approval is stale");
   if (makePlan(run.plan, run.plan.repository).digest !== run.plan.digest) {
     throw new Error("Accepted plan content changed");
   }
@@ -321,11 +323,11 @@ export function parseRun(value: unknown): Run {
     run.operations.some((operation) => operation.unit >= run.units.length) ||
     run.edits.some((edit) => edit.unit >= run.units.length)
   ) {
-    throw new Error("Workflow record has an invalid operation unit");
+    throw new Error("Journey record has an invalid operation unit");
   }
   for (const [index, unit] of run.units.entries()) {
-    const expected = `workflow/${run.id.slice(0, 8)}${run.plan.delivery === "stack" ? `/${index + 1}` : ""}`;
-    if (unit.branch !== expected) throw new Error("Workflow branch identity changed");
+    const expected = `journey/${run.id.slice(0, 8)}${run.plan.delivery === "stack" ? `/${index + 1}` : ""}`;
+    if (unit.branch !== expected) throw new Error("Journey branch identity changed");
   }
   return run;
 }
@@ -336,7 +338,7 @@ export function evidence(head: string, passed: boolean, detail: string) {
 
 export function expectedUnitHead(run: Run): string | null {
   const unit = run.units[run.unitIndex];
-  if (!unit) throw new Error("Workflow unit is absent");
+  if (!unit) throw new Error("Journey unit is absent");
   return run.plan.delivery === "single" && run.unitIndex > 0 && unit.head === null
     ? (run.units[run.unitIndex - 1]?.head ?? null)
     : (unit.head ?? unit.baseHead ?? run.startHead);
@@ -345,7 +347,7 @@ export function expectedUnitHead(run: Run): string | null {
 export function isCurrentEvidence(unit: Static<typeof UnitSchema>): boolean {
   return (
     unit.head !== null &&
-    [unit.checks, unit.secondPass, unit.review].every(
+    [unit.checks, unit.secondPass, unit.impacts].every(
       (item) => item?.passed && item.head === unit.head,
     )
   );

@@ -19,6 +19,18 @@ export async function fileHash(path: string): Promise<string | null> {
   }
 }
 
+// A crash can leave either side of a prepared write; confirmation admits only its output
+export function matchesOwnedEdit(
+  edit: Run["edits"][number] | undefined,
+  contentHash: string | null,
+): boolean {
+  return (
+    edit !== undefined &&
+    (contentHash === edit.afterHash ||
+      (edit.state === "prepared" && contentHash === edit.beforeHash))
+  );
+}
+
 export async function writeOwnedFile(
   run: Run,
   journal: Journal,
@@ -46,12 +58,12 @@ export async function writeOwnedFile(
     (await git("branch", "--show-current")).trim() !== record.units[record.unitIndex]?.branch ||
     record.unitIndex !== run.unitIndex
   )
-    throw new Error("Workflow branch or HEAD changed before owned write");
+    throw new Error("Journey branch or HEAD changed before owned write");
   const tracked = await git("--literal-pathspecs", "ls-tree", "-z", "--name-only", head, "--", rel);
   const baseline = tracked ? hash(await git("cat-file", "--filters", `${head}:${rel}`)) : null;
   const beforeHash = await fileHash(safe);
-  const owned = record.edits.findLast((edit) => edit.path === rel && edit.state === "confirmed");
-  if (beforeHash !== baseline && (!owned || beforeHash !== owned.afterHash)) {
+  const latest = record.edits.findLast((edit) => edit.path === rel);
+  if (beforeHash !== baseline && !matchesOwnedEdit(latest, beforeHash)) {
     throw new Error(`External change at ${rel}; file preserved`);
   }
   const edit: Run["edits"][number] = {
