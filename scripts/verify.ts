@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { Type } from "typebox";
 import { parse } from "../src/contracts.ts";
 
-const directory = mkdtempSync(join(tmpdir(), "pi-workflow-cli-"));
+const directory = mkdtempSync(join(tmpdir(), "pi-journey-cli-"));
 try {
   const initialized = spawnSync("git", ["init", "--initial-branch=main", directory], {
     encoding: "utf8",
@@ -15,7 +15,7 @@ try {
   assert.equal(initialized.status, 0, initialized.stderr);
   const source = resolve(fileURLToPath(new URL("../src/index.ts", import.meta.url)));
   const result = spawnSync(
-    process.env.PI_WORKFLOW_TEST_BINARY ?? "pi",
+    process.env.PI_JOURNEY_TEST_BINARY ?? "pi",
     [
       "--mode",
       "rpc",
@@ -34,7 +34,7 @@ try {
       cwd: directory,
       encoding: "utf8",
       timeout: 15_000,
-      input: '{"id":"workflow-commands","type":"get_commands"}\n',
+      input: '{"id":"journey-commands","type":"get_commands"}\n',
       env: {
         ...process.env,
         PI_CODING_AGENT_DIR: join(directory, "agent"),
@@ -62,16 +62,16 @@ try {
       typeof value === "object" &&
       value !== null &&
       "id" in value &&
-      value.id === "workflow-commands",
+      value.id === "journey-commands",
   );
   const decoded = parse(ResponseSchema, response, "Pi RPC command response");
   assert.equal(decoded.success, true);
   assert.ok(
-    decoded.data.commands.some((command) => command.name === "workflow"),
-    "native Pi registers /workflow",
+    decoded.data.commands.some((command) => command.name === "journey"),
+    "native Pi registers /journey",
   );
   console.log(
-    "PASS: isolated Pi RPC loads /workflow without a model call or daily-driver configuration changes",
+    "PASS: isolated Pi RPC loads /journey without a model call or daily-driver configuration changes",
   );
 } finally {
   rmSync(directory, { recursive: true, force: true });

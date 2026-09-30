@@ -8,8 +8,8 @@ import { defaultConfig, makePlan, makeRun, type Review, type Run } from "../src/
 import { Delivery } from "../src/delivery.ts";
 import { hash } from "../src/files.ts";
 import { Journal } from "../src/journal.ts";
+import { createJourney } from "../src/journey.ts";
 import { OwnedResources } from "../src/runner.ts";
-import { createWorkflow } from "../src/workflow.ts";
 import { repository } from "./helpers.ts";
 
 const scenarios: readonly {
@@ -65,7 +65,7 @@ for (const {
     }
     const resources = new InterruptedBranch();
     const journal = new Journal(fixture.root);
-    let actor: ReturnType<typeof createWorkflow> | undefined;
+    let actor: ReturnType<typeof createJourney> | undefined;
     const bare = join(journal.directory, "fixture-remote.git");
     const statePath = join(journal.directory, "github-state.json");
     try {
@@ -221,7 +221,7 @@ fs.writeFileSync(file,JSON.stringify(state));process.stdout.write(typeof result=
         },
       };
       const delivery = new Delivery(fixture.root, journal, resources, workers, () => {});
-      actor = createWorkflow({
+      actor = createJourney({
         execute: (stage, run, signal) => delivery.execute(stage, run, signal),
         save: (run, phase) => journal.checkpoint(run, phase),
         drain: async (outcome) => {

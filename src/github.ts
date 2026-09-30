@@ -68,7 +68,7 @@ export class GitHub {
       ),
       "PR lookup",
     );
-    if (values.length > 1) throw new Error("Multiple PRs exist for the workflow branch");
+    if (values.length > 1) throw new Error("Multiple PRs exist for the journey branch");
     return values[0]?.number ?? null;
   }
 }

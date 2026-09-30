@@ -1,7 +1,7 @@
 import { assign, createActor, type DoneActorEvent, fromPromise, setup } from "xstate";
 import type { Run, Stage, StepResult } from "./contracts.ts";
 
-export interface WorkflowPorts {
+export interface JourneyPorts {
   execute(stage: Stage, run: Run, signal: AbortSignal): Promise<StepResult>;
   drain(outcome: "stopped" | "delivered"): Promise<void>;
   save(run: Run, state: string): void;
@@ -20,7 +20,7 @@ type Event =
   | { type: "run.resumed"; acceptRecoveredEdits: boolean; run?: Run }
   | { type: "ownership.lost"; reason: string };
 
-export function workflowMachine(ports: WorkflowPorts) {
+export function journeyMachine(ports: JourneyPorts) {
   const configured = setup({
     types: {
       context: {} as Context,
@@ -57,7 +57,7 @@ export function workflowMachine(ports: WorkflowPorts) {
         reason: result.kind === "blocked" ? result.reason : "",
       })),
       recordError: assign((_args, error: unknown) => ({
-        reason: error instanceof Error ? error.message : "Workflow operation failed",
+        reason: error instanceof Error ? error.message : "Journey operation failed",
       })),
       checkpoint: ({ context }, stage: string) => {
         if (context.run !== null) ports.save(context.run, stage);
@@ -137,7 +137,7 @@ export function workflowMachine(ports: WorkflowPorts) {
     });
 
   return configured.createMachine({
-    id: "modeWorkflow",
+    id: "journey",
     initial: "idle",
     context: { run: null, reason: "" },
     on: {
@@ -209,6 +209,6 @@ export function workflowMachine(ports: WorkflowPorts) {
   });
 }
 
-export function createWorkflow(ports: WorkflowPorts) {
-  return createActor(workflowMachine(ports));
+export function createJourney(ports: JourneyPorts) {
+  return createActor(journeyMachine(ports));
 }

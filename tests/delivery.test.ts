@@ -179,7 +179,7 @@ test("coordinator commits attributable scoped edits and preserves unrelated file
     execFileSync("git", ["-C", fixture.root, "checkout", "main"], { stdio: "ignore" });
     await assert.rejects(
       delivery.execute("commit", record, new AbortController().signal),
-      /Workflow branch changed/,
+      /Journey branch changed/,
     );
     assert.equal(
       execFileSync("git", ["-C", fixture.root, "rev-parse", "main"], {

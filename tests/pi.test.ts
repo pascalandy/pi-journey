@@ -11,7 +11,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { defaultConfig, makePlan, makeRun, type PlanInput, parse } from "../src/contracts.ts";
-import modeWorkflow from "../src/index.ts";
+import journey from "../src/index.ts";
 import { repository } from "./helpers.ts";
 
 test("real Pi SDK leaves an idle session unrestricted and binds approval to the visible plan", async () => {
@@ -25,7 +25,7 @@ test("real Pi SDK leaves an idle session unrestricted and binds approval to the 
   const loader = new DefaultResourceLoader({
     cwd: fixture.root,
     agentDir: join(fixture.root, ".isolated"),
-    extensionFactories: [modeWorkflow],
+    extensionFactories: [journey],
     noExtensions: true,
     noSkills: true,
     noPromptTemplates: true,
@@ -41,7 +41,7 @@ test("real Pi SDK leaves an idle session unrestricted and binds approval to the 
     settingsManager: settings,
     sessionManager: manager,
     modelRuntime: await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }),
-    tools: ["read", "workflow_plan"],
+    tools: ["read", "journey_plan"],
   });
   try {
     await session.bindExtensions({});
@@ -63,8 +63,8 @@ test("real Pi SDK leaves an idle session unrestricted and binds approval to the 
       excludeFromContext: false,
     });
     assert.equal(shell?.result, undefined, "an idle session runs its own shell commands");
-    assert.equal(runner.getToolDefinition("workflow_plan")?.name, "workflow_plan");
-    const plan = runner.getToolDefinition("workflow_plan");
+    assert.equal(runner.getToolDefinition("journey_plan")?.name, "journey_plan");
+    const plan = runner.getToolDefinition("journey_plan");
     assert.ok(plan);
     const proposal = {
       goal: "Add an export",
@@ -97,7 +97,7 @@ test("real Pi SDK leaves an idle session unrestricted and binds approval to the 
     );
     const digestB = parse(digestSchema, resultB.details, "receipt").digest;
     await session.navigateTree(leafA, { summarize: false });
-    const command = runner.getCommand("workflow");
+    const command = runner.getCommand("journey");
     assert.ok(command);
     await command.handler(
       `implement ${"0".repeat(64)} --allow-checks`,

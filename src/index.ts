@@ -15,12 +15,12 @@ import {
 } from "./contracts.ts";
 import { Delivery } from "./delivery.ts";
 import { Journal } from "./journal.ts";
+import { createJourney } from "./journey.ts";
 import { runAdmission, validateScope } from "./policy.ts";
 import { OwnedResources, Workers } from "./runner.ts";
-import { createWorkflow } from "./workflow.ts";
 
-export default function modeWorkflow(pi: ExtensionAPI): void {
-  let actor: ReturnType<typeof createWorkflow> | undefined;
+export default function journey(pi: ExtensionAPI): void {
+  let actor: ReturnType<typeof createJourney> | undefined;
   let journal: Journal | undefined;
   let resources: OwnedResources | undefined;
   let repository = "";
@@ -32,7 +32,7 @@ export default function modeWorkflow(pi: ExtensionAPI): void {
   const report = (text: string) =>
     pi.sendMessage(
       {
-        customType: "workflow-status",
+        customType: "journey-status",
         content: text,
         display: true,
         details: {},
@@ -48,7 +48,7 @@ export default function modeWorkflow(pi: ExtensionAPI): void {
   const lockControl = (operation: () => Promise<void>) => {
     const job = control.then(operation);
     control = job.catch((error: unknown) => {
-      report(error instanceof Error ? error.message : "Workflow command failed");
+      report(error instanceof Error ? error.message : "Journey command failed");
     });
     return control;
   };
@@ -94,7 +94,7 @@ export default function modeWorkflow(pi: ExtensionAPI): void {
     );
     journal = store;
     resources = owned;
-    const coordinator = createWorkflow({
+    const coordinator = createJourney({
       execute: (stage, run, signal) => delivery.execute(stage, run, signal),
       save: (run, state) => store.checkpoint(run, state),
       drain: async (outcome) => {
@@ -109,7 +109,7 @@ export default function modeWorkflow(pi: ExtensionAPI): void {
     coordinator.subscribe({
       next: (snapshot) => {
         const state = String(snapshot.value);
-        ctx.ui.setStatus("mode-workflow", state === "idle" ? undefined : `Workflow | ${state}`);
+        ctx.ui.setStatus("journey", state === "idle" ? undefined : `Journey | ${state}`);
         if (state !== previous && ["blocked", "stopFailed", "delivered"].includes(state)) {
           const latest = store.current() ?? snapshot.context.run;
           report(
@@ -126,9 +126,9 @@ export default function modeWorkflow(pi: ExtensionAPI): void {
     if (prior && !["delivered", "retired"].includes(prior.checkpoint))
       coordinator.send({ type: "run.recovered", run: prior });
     for (const entry of ctx.sessionManager.getBranch()) {
-      if (entry.type === "custom" && entry.customType === "workflow-plan-cleared")
+      if (entry.type === "custom" && entry.customType === "journey-plan-cleared")
         pending = undefined;
-      if (entry.type === "custom" && entry.customType === "workflow-plan") {
+      if (entry.type === "custom" && entry.customType === "journey-plan") {
         pending = parse(PlanSchema, entry.data, "session plan");
         if (pending.repository !== repository) pending = undefined;
       }
@@ -141,7 +141,7 @@ export default function modeWorkflow(pi: ExtensionAPI): void {
     allowChecks: boolean,
   ): Promise<void> {
     if (!actor || !journal || !resources)
-      throw new Error("Workflow is unavailable in this directory");
+      throw new Error("Pi Journey is unavailable in this directory");
     const coordinator = actor;
     const store = journal;
     const owned = resources;
@@ -151,13 +151,13 @@ export default function modeWorkflow(pi: ExtensionAPI): void {
       throw new Error("Stop or resume the existing run first");
     const proposal = pending;
     if (!proposal || proposal.repository !== repository)
-      throw new Error("Record a plan with workflow_plan first");
+      throw new Error("Record a plan with journey_plan first");
     if (digest && digest !== proposal.digest)
       throw new Error("Plan approval digest does not match the current proposal");
     if (!allowChecks) {
       if (!ctx.hasUI)
         throw new Error(
-          `Use /workflow implement ${proposal.digest} --allow-checks after reviewing the plan`,
+          `Use /journey implement ${proposal.digest} --allow-checks after reviewing the plan`,
         );
       const accepted = await ctx.ui.confirm(
         "Implement the accepted plan?",
@@ -172,8 +172,8 @@ export default function modeWorkflow(pi: ExtensionAPI): void {
       throw new Error("Plan changed while approval was open");
     const prior = store.current();
     if (prior && !["delivered", "retired"].includes(prior.checkpoint))
-      throw new Error("An unfinished run exists; use /workflow resume");
-    const configurationPath = join(repository, ".pi", "mode-workflow.json");
+      throw new Error("An unfinished run exists; use /journey resume");
+    const configurationPath = join(repository, ".pi", "journey.json");
     let overrides: unknown = {};
     try {
       overrides = JSON.parse(readFileSync(configurationPath, "utf8"));
@@ -182,7 +182,7 @@ export default function modeWorkflow(pi: ExtensionAPI): void {
     }
     const config = {
       ...defaultConfig(),
-      ...parse(Type.Partial(ConfigSchema), overrides, "workflow configuration"),
+      ...parse(Type.Partial(ConfigSchema), overrides, "journey configuration"),
     };
     const run = makeRun(proposal, config);
     owned.reset();
@@ -196,7 +196,7 @@ export default function modeWorkflow(pi: ExtensionAPI): void {
   }
 
   pi.registerTool({
-    name: "workflow_plan",
+    name: "journey_plan",
     label: "Record plan",
     description:
       "Record the implementation plan: goal, body, ordered units with writable paths and commit messages, named checks, and delivery. Recording never approves implementation.",
@@ -207,14 +207,14 @@ export default function modeWorkflow(pi: ExtensionAPI): void {
       const proposal = parse(PlanInputSchema, input, "plan proposal");
       for (const unit of proposal.units) validateScope(unit.paths);
       pending = makePlan(proposal, repository);
-      pi.appendEntry("workflow-plan", pending);
+      pi.appendEntry("journey-plan", pending);
       return {
         content: [
           {
             type: "text",
             text:
-              `Plan recorded. Digest ${pending.digest}. The operator can review it with /workflow implement ` +
-              `or approve it with /workflow implement ${pending.digest} --allow-checks. No implementation was authorized.`,
+              `Plan recorded. Digest ${pending.digest}. The operator can review it with /journey implement ` +
+              `or approve it with /journey implement ${pending.digest} --allow-checks. No implementation was authorized.`,
           },
         ],
         details: { digest: pending.digest },
@@ -222,7 +222,7 @@ export default function modeWorkflow(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerCommand("workflow", {
+  pi.registerCommand("journey", {
     description:
       "stop | status | implement [<digest> --allow-checks] | resume [--accept-edits] | retire",
     handler: async (args, ctx) =>
@@ -259,7 +259,7 @@ export default function modeWorkflow(pi: ExtensionAPI): void {
             await journal.release();
           }
           pending = undefined;
-          pi.appendEntry("workflow-plan-cleared", { reason: "run-retired", runId: run.id });
+          pi.appendEntry("journey-plan-cleared", { reason: "run-retired", runId: run.id });
           actor.send({ type: "run.retired" });
           report(
             "Run retired after confirmed drain. Files, branches, PRs and history are preserved. Return to the current base and record a new plan before approval.",
@@ -282,21 +282,21 @@ export default function modeWorkflow(pi: ExtensionAPI): void {
             run,
             acceptRecoveredEdits: flags.includes("--accept-edits"),
           });
-        } else throw new Error("Unknown workflow command");
+        } else throw new Error("Unknown journey command");
       }),
   });
   pi.on("session_start", async (_event, ctx) => {
     try {
       await initialize(ctx);
     } catch (error) {
-      report(error instanceof Error ? error.message : "Workflow initialization failed");
+      report(error instanceof Error ? error.message : "Pi Journey initialization failed");
     }
   });
   pi.on("before_agent_start", (event) =>
     active()
       ? {
           systemPrompt:
-            `${event.systemPrompt}\n\nA workflow run owns this repository. You are its read-only conductor: ` +
+            `${event.systemPrompt}\n\nA journey run owns this repository. You are its read-only conductor: ` +
             "report status and investigate when asked. Do not claim completion without recorded evidence.",
         }
       : undefined,
@@ -306,7 +306,7 @@ export default function modeWorkflow(pi: ExtensionAPI): void {
     active()
       ? {
           result: {
-            output: "An active run owns this repository; use /workflow stop first.",
+            output: "An active run owns this repository; use /journey stop first.",
             exitCode: 1,
             cancelled: false,
             truncated: false,

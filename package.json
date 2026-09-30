@@ -1,7 +1,7 @@
 {
-  "name": "@pascalandy/pi-mode-workflow",
+  "name": "@pascalandy/pi-journey",
   "version": "0.1.0",
-  "description": "Planning and XState-owned implementation workflows for Pi",
+  "description": "Operator-started journeys for Pi, owned by one XState coordinator",
   "type": "module",
   "license": "MIT",
   "packageManager": "pnpm@12.8.1",
@@ -31,6 +31,6 @@
     "@types/proper-lockfile": "4.1.4",
     "typescript": "6.0.3"
   },
-  "keywords": ["pi-package", "pi-extension", "xstate", "workflow"],
-  "repository": { "type": "git", "url": "git+https://github.com/pascalandy/pi-mode-workflow.git" }
+  "keywords": ["pi-package", "pi-extension", "xstate", "journey"],
+  "repository": { "type": "git", "url": "git+https://github.com/pascalandy/pi-journey.git" }
 }

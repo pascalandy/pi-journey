@@ -35,7 +35,7 @@ test("commands preserve argv and report the actual exit code", async () => {
 
 test("drain cancels the complete child process group before returning", async () => {
   if (process.platform === "win32") return;
-  const directory = await mkdtemp(join(tmpdir(), "workflow-process-"));
+  const directory = await mkdtemp(join(tmpdir(), "journey-process-"));
   const marker = join(directory, "pid");
   const resources = new OwnedResources();
   const childProgram =
@@ -78,7 +78,7 @@ test("drain cancels the complete child process group before returning", async ()
 
 test("coordinator death stops the owned command before a replacement can resume effects", async () => {
   if (process.platform === "win32") return;
-  const directory = await mkdtemp(join(tmpdir(), "workflow-owner-death-"));
+  const directory = await mkdtemp(join(tmpdir(), "journey-owner-death-"));
   const marker = join(directory, "pid");
   const program =
     "require('node:fs').writeFileSync(process.argv[1],String(process.pid));process.on('SIGTERM',()=>{});setInterval(()=>{},1000)";

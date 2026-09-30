@@ -9,10 +9,10 @@ import { defaultConfig, makePlan, makeRun } from "../src/contracts.ts";
 for (const key of Object.keys(process.env)) if (key.startsWith("GIT_")) delete process.env[key];
 
 export async function repository() {
-  const root = await mkdtemp(join(tmpdir(), "pi-mode-workflow-test-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-journey-test-"));
   execFileSync("git", ["init", "--initial-branch=main", root], { stdio: "ignore" });
   execFileSync("git", ["-C", root, "config", "user.email", "test@example.invalid"]);
-  execFileSync("git", ["-C", root, "config", "user.name", "Workflow test"]);
+  execFileSync("git", ["-C", root, "config", "user.name", "Journey test"]);
   execFileSync("git", ["-C", root, "config", "commit.gpgSign", "false"]);
   execFileSync("git", ["-C", root, "config", "core.hooksPath", "/dev/null"]);
   execFileSync("git", ["-C", root, "commit", "--allow-empty", "-m", "chore: initialize fixture"], {

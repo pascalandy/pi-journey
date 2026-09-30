@@ -12,7 +12,7 @@ const READ_TOOLS = ["read", "grep", "find", "ls"];
 
 export function runAdmission(name: string): { block: true; reason: string } | undefined {
   if (READ_TOOLS.includes(name)) return undefined;
-  return { block: true, reason: "An active run owns this repository; use /workflow stop first" };
+  return { block: true, reason: "An active run owns this repository; use /journey stop first" };
 }
 
 function inside(root: string, target: string): boolean {
@@ -22,7 +22,7 @@ function inside(root: string, target: string): boolean {
 
 function metadata(path: string): boolean {
   const normalized = path.toLowerCase();
-  return normalized.split(sep).includes(".git") || normalized === ".pi/mode-workflow.json";
+  return normalized.split(sep).includes(".git") || normalized === ".pi/journey.json";
 }
 
 export function canonicalRepoPath(path: string): string {

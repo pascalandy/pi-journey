@@ -1,4 +1,4 @@
-# Working on Pi mode workflow
+# Working on Pi Journey
 
 Read [plan.html](plan.html) for the design and acceptance contract. [README.md](README.md) owns user-facing setup and commands.
 

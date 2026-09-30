@@ -64,7 +64,7 @@ test("a missing active record cannot be mistaken for permission to start a new r
     await journal.acquire(record.id);
     journal.write(record);
     await unlink(join(journal.directory, "runs", `${record.id}.json`));
-    assert.throws(() => journal.current(), /Active workflow record is missing/);
+    assert.throws(() => journal.current(), /Active journey record is missing/);
   } finally {
     await journal.release();
     await fixture.cleanup();

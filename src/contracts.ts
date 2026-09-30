@@ -252,10 +252,10 @@ export function makeRun(plan: Plan, config: Config): Run {
     remoteIdentity: null,
     originUrl: null,
     units: plan.units.map((_unit, index) => ({
-      branch: `workflow/${id.slice(0, 8)}${plan.delivery === "stack" ? `/${index + 1}` : ""}`,
+      branch: `journey/${id.slice(0, 8)}${plan.delivery === "stack" ? `/${index + 1}` : ""}`,
       baseBranch:
         plan.delivery === "stack" && index > 0
-          ? `workflow/${id.slice(0, 8)}/${index}`
+          ? `journey/${id.slice(0, 8)}/${index}`
           : config.baseBranch,
       baseHead: null,
       head: null,
@@ -279,9 +279,9 @@ export function makeRun(plan: Plan, config: Config): Run {
 }
 
 export function parseRun(value: unknown): Run {
-  const run = parse(RunSchema, value, "workflow record");
+  const run = parse(RunSchema, value, "journey record");
   if (run.units.length !== run.plan.units.length || run.unitIndex >= run.units.length) {
-    throw new Error("Workflow record has inconsistent units");
+    throw new Error("Journey record has inconsistent units");
   }
   if (makePlan(run.plan, run.plan.repository).digest !== run.plan.digest) {
     throw new Error("Accepted plan content changed");
@@ -290,11 +290,11 @@ export function parseRun(value: unknown): Run {
     run.operations.some((operation) => operation.unit >= run.units.length) ||
     run.edits.some((edit) => edit.unit >= run.units.length)
   ) {
-    throw new Error("Workflow record has an invalid operation unit");
+    throw new Error("Journey record has an invalid operation unit");
   }
   for (const [index, unit] of run.units.entries()) {
-    const expected = `workflow/${run.id.slice(0, 8)}${run.plan.delivery === "stack" ? `/${index + 1}` : ""}`;
-    if (unit.branch !== expected) throw new Error("Workflow branch identity changed");
+    const expected = `journey/${run.id.slice(0, 8)}${run.plan.delivery === "stack" ? `/${index + 1}` : ""}`;
+    if (unit.branch !== expected) throw new Error("Journey branch identity changed");
   }
   return run;
 }
@@ -305,7 +305,7 @@ export function evidence(head: string, passed: boolean, detail: string) {
 
 export function expectedUnitHead(run: Run): string | null {
   const unit = run.units[run.unitIndex];
-  if (!unit) throw new Error("Workflow unit is absent");
+  if (!unit) throw new Error("Journey unit is absent");
   return run.plan.delivery === "single" && run.unitIndex > 0 && unit.head === null
     ? (run.units[run.unitIndex - 1]?.head ?? null)
     : (unit.head ?? unit.baseHead ?? run.startHead);

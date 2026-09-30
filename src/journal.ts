@@ -73,7 +73,7 @@ export class Journal {
         env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
       },
     ).trim();
-    this.directory = resolve(gitDirectory, "pi-mode-workflow");
+    this.directory = resolve(gitDirectory, "pi-journey");
   }
 
   get owned(): boolean {
@@ -142,7 +142,7 @@ export class Journal {
     this.assertOwned(run.id);
     parseRun(run);
     if (run.plan.repository !== this.repository)
-      throw new Error("Workflow repository identity changed");
+      throw new Error("Journey repository identity changed");
     atomic(join(this.directory, "runs", `${run.id}.json`), run);
     atomic(join(this.directory, "active.json"), { id: run.id });
   }
@@ -177,7 +177,7 @@ export class Journal {
     if (!existsSync(path)) return null;
     const run = parseRun(JSON.parse(readFileSync(path, "utf8")));
     if (run.id !== id || run.plan.repository !== this.repository) {
-      throw new Error("Workflow journal identity changed");
+      throw new Error("Journey journal identity changed");
     }
     return run;
   }
@@ -192,9 +192,7 @@ export class Journal {
     );
     const run = this.read(pointer.id);
     if (run === null)
-      throw new Error(
-        "Active workflow record is missing; reconcile it before starting another run",
-      );
+      throw new Error("Active journey record is missing; reconcile it before starting another run");
     return run;
   }
 

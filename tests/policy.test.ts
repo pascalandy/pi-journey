@@ -15,10 +15,10 @@ test("an active run admits investigation and rejects plan, write, and execution 
   for (const name of ["read", "grep", "find", "ls"]) {
     assert.equal(runAdmission(name), undefined);
   }
-  for (const name of ["workflow_plan", "write", "edit", "bash", "codemode", "other"]) {
+  for (const name of ["journey_plan", "write", "edit", "bash", "codemode", "other"]) {
     assert.deepEqual(runAdmission(name), {
       block: true,
-      reason: "An active run owns this repository; use /workflow stop first",
+      reason: "An active run owns this repository; use /journey stop first",
     });
   }
 });
@@ -40,10 +40,7 @@ test("scoped writes reject repository escape, metadata, symlink escape, and hard
     await assert.rejects(() => writablePath(fixture.root, ["."], "../outside"), /scope/);
     await assert.rejects(() => writablePath(fixture.root, ["."], ".git/config"), /scope/);
     await assert.rejects(() => writablePath(fixture.root, ["."], ".GIT/config"), /scope/);
-    await assert.rejects(
-      () => writablePath(fixture.root, ["."], ".PI/MODE-WORKFLOW.JSON"),
-      /scope/,
-    );
+    await assert.rejects(() => writablePath(fixture.root, ["."], ".PI/JOURNEY.JSON"), /scope/);
     await assert.rejects(() => writablePath(fixture.root, ["src"], "src/link/secret"), /scope/);
     await assert.rejects(() => writablePath(fixture.root, ["src"], "src/dangling"), /symlink/);
     await assert.rejects(() => writablePath(fixture.root, ["src"], "src/two"), /hard-linked/);

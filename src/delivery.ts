@@ -16,9 +16,12 @@ import type { Journal } from "./journal.ts";
 import { approvedPaths, scopeAllows, validateScope } from "./policy.ts";
 import type { OwnedResources, Workers } from "./runner.ts";
 
+// Recovery recognizes the journey's own commits by this trailer
+const RUN_TRAILER = "Journey-Run";
+
 function current(run: Run) {
   const unit = run.units[run.unitIndex];
-  if (!unit) throw new Error("Workflow unit is absent");
+  if (!unit) throw new Error("Journey unit is absent");
   return unit;
 }
 
@@ -119,7 +122,7 @@ export class Delivery {
 
   private async fetchBase(run: Run, signal: AbortSignal): Promise<string> {
     if (run.originUrl === null) throw new Error("Approved remote URL is absent");
-    const ref = `refs/pi-mode-workflow/${run.id}/base`;
+    const ref = `refs/pi-journey/${run.id}/base`;
     await this.git(["fetch", run.originUrl, `refs/heads/${run.config.baseBranch}:${ref}`], signal);
     return this.git(["rev-parse", ref], signal);
   }
@@ -127,12 +130,12 @@ export class Delivery {
   private async assertExpectedHead(run: Run, signal: AbortSignal): Promise<void> {
     const unit = current(run);
     if ((await this.git(["branch", "--show-current"], signal)) !== unit.branch) {
-      throw new Error("Workflow branch changed outside recorded operations; files are preserved");
+      throw new Error("Journey branch changed outside recorded operations; files are preserved");
     }
     const expected = expectedUnitHead(run);
     if (!expected || (await this.head(signal)) !== expected) {
       throw new Error(
-        "Workflow HEAD changed outside recorded operations; preserve it for operator review",
+        "Journey HEAD changed outside recorded operations; preserve it for operator review",
       );
     }
   }
@@ -235,7 +238,7 @@ export class Delivery {
         const parents = await this.git(["show", "-s", "--format=%P", head], signal);
         if (
           head !== intent.expectedHead &&
-          (!message.includes(`Workflow-Run: ${run.id}`) ||
+          (!message.includes(`${RUN_TRAILER}: ${run.id}`) ||
             !parents.split(" ").includes(intent.expectedHead ?? ""))
         ) {
           throw new Error("Uncertain commit has an unexpected head");
@@ -267,15 +270,15 @@ export class Delivery {
 
   async preflight(run: Run, signal: AbortSignal): Promise<StepResult> {
     if (!["linux", "darwin"].includes(process.platform))
-      throw new Error("Workflow process ownership supports Linux and macOS");
+      throw new Error("Journey process ownership supports Linux and macOS");
     await this.workers.preflight(run, signal);
     if ((await this.git(["rev-parse", "--show-toplevel"], signal)) !== this.repository)
-      throw new Error("Run workflow from the repository root");
+      throw new Error("Run the journey from the repository root");
     for (const unit of run.plan.units) validateScope(unit.paths);
     await this.git(["check-ref-format", "--branch", run.config.baseBranch], signal);
     const origin = await this.git(["config", "--get", "remote.origin.url"], signal);
     if (!/^(https:\/\/github\.com\/|git@github\.com:)[^/]+\/[^/]+?(?:\.git)?$/.test(origin)) {
-      throw new Error("Workflow delivery requires a GitHub origin using HTTPS or SSH");
+      throw new Error("Journey delivery requires a GitHub origin using HTTPS or SSH");
     }
     const identity = await this.github.identity(signal);
     if (run.remoteIdentity !== null && run.remoteIdentity !== identity)
@@ -410,7 +413,7 @@ export class Delivery {
               "-m",
               message,
               "-m",
-              `Workflow-Run: ${run.id}\nWorkflow-Unit: ${run.unitIndex + 1}`,
+              `${RUN_TRAILER}: ${run.id}\nJourney-Unit: ${run.unitIndex + 1}`,
             ],
             signal,
           );
@@ -542,7 +545,7 @@ export class Delivery {
             `${run.plan.goal}\n\n${run.plan.body}\n\n` +
               `Validation at ${unit.head}\n\n${run.plan.checks.map((check) => `${check.name}: passed`).join("\n")}\n\n` +
               `Second pass: ${unit.secondPass?.detail}\nIndependent review: ${unit.review?.detail}\n\n` +
-              `Workflow-Run: ${run.id}\n\nCreated by the Pi workflow extension using its configured Pi worker and GPT-6 Astra high in Codex.`,
+              `${RUN_TRAILER}: ${run.id}\n\nCreated by Pi Journey using its configured Pi worker and GPT-6 Astra high in Codex.`,
             { mode: 0o600 },
           );
           await this.github.command(
